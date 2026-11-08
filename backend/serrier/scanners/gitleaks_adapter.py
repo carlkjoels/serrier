@@ -39,30 +39,41 @@ class GitleaksAdapter:
         return True
 
     def skanna(self, projekt_rot: Path, project_id: str) -> list[Finding]:
+        """Working tree (nuvarande filer)."""
+        return self._kor(["dir", str(projekt_rot)], projekt_rot, project_id, self.namn)
+
+    def skanna_historik(self, repo: Path, project_id: str) -> list[Finding]:
+        """Git-HISTORIKEN: hemligheter som committats — även om de tagits bort ur working
+        tree ligger de kvar i historiken och är fortfarande komprometterade."""
+        return self._kor(["git", str(repo)], repo, project_id, "gitleaks-history")
+
+    def _kor(self, delkommando: list[str], rot: Path, project_id: str,
+             detektor: str) -> list[Finding]:
         if not self.tillganglig():
             return []
         with tempfile.TemporaryDirectory() as td:
             rapport = Path(td) / "gitleaks.json"
             try:
                 subprocess.run(  # noqa: S603 — argv-array, ingen shell, binär vi kontrollerar
-                    [self._binar, "dir", str(projekt_rot), "--report-format", "json",
+                    [self._binar, *delkommando, "--report-format", "json",
                      "--report-path", str(rapport), "--redact"],
                     capture_output=True, timeout=_TIMEOUT, check=False)
                 data = json.loads(rapport.read_text()) if rapport.exists() else []
             except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
                 return []
-        return [self._till_finding(x, projekt_rot, project_id) for x in data]
+        return [self._till_finding(x, rot, project_id, detektor) for x in data]
 
-    def _till_finding(self, x: dict, rot: Path, project_id: str) -> Finding:
+    def _till_finding(self, x: dict, rot: Path, project_id: str, detektor: str) -> Finding:
         fil = Path(x.get("File", ""))
         rel = fil.resolve().relative_to(rot.resolve()).as_posix() if inom_roten(rot, fil) \
             else fil.name
-        plats = f"{rel}:{x.get('StartLine', '?')}"
+        commit = str(x.get("Commit", ""))[:8]
+        plats = f"{rel}:{x.get('StartLine', '?')}" + (f"@{commit}" if commit else "")
         regel = x.get("RuleID", "gitleaks")
         return Finding(
-            project_id=project_id, category=Category.secret, detector=self.namn,
+            project_id=project_id, category=Category.secret, detector=detektor,
             severity=Severity.high, confidence=Confidence.probable, asset_ref=plats,
-            title=f"gitleaks: {regel}", rule=regel,
-            evidence=[Evidence.av(source=self.namn, location=plats, detection_method=regel,
+            title=f"{detektor}: {regel}", rule=regel,
+            evidence=[Evidence.av(source=detektor, location=plats, detection_method=regel,
                                   confidence=Confidence.probable,
                                   ra_innehall=str(x.get("Secret") or x.get("Match") or regel))])

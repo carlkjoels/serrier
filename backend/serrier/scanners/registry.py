@@ -11,8 +11,11 @@ from serrier.ingest.dedup import deduplicera
 from serrier.scanners.base import Scanner
 from serrier.scanners.builtin import InbyggdHemlighetsskanner
 from serrier.scanners.gitleaks_adapter import GitleaksAdapter
+from serrier.scanners.osv_adapter import OsvAdapter
+from serrier.scanners.semgrep_adapter import SemgrepAdapter
 
-SKANNERS: list[Scanner] = [InbyggdHemlighetsskanner(), GitleaksAdapter()]
+SKANNERS: list[Scanner] = [InbyggdHemlighetsskanner(), GitleaksAdapter(),
+                           SemgrepAdapter(), OsvAdapter()]
 
 
 def tillgangliga() -> list[Scanner]:

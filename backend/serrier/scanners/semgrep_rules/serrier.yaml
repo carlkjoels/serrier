@@ -1,0 +1,34 @@
+rules:
+  - id: python-eval-untrusted
+    pattern: eval(...)
+    message: "eval() kan exekvera godtycklig kod om indata inte är fullt betrodd."
+    languages: [python]
+    severity: ERROR
+  - id: python-exec-untrusted
+    pattern: exec(...)
+    message: "exec() kan exekvera godtycklig kod om indata inte är fullt betrodd."
+    languages: [python]
+    severity: ERROR
+  - id: subprocess-shell-true
+    patterns:
+      - pattern: subprocess.$F(..., shell=True, ...)
+    message: "subprocess med shell=True → command injection om indata inte saneras."
+    languages: [python]
+    severity: ERROR
+  - id: yaml-unsafe-load
+    pattern: yaml.load(...)
+    message: "yaml.load utan SafeLoader kan deserialisera godtyckliga objekt."
+    languages: [python]
+    severity: WARNING
+  - id: flask-debug-true
+    patterns:
+      - pattern: $APP.run(..., debug=True, ...)
+    message: "Flask debug=True i produktion exponerar en interaktiv RCE-konsol."
+    languages: [python]
+    severity: ERROR
+  - id: requests-verify-false
+    patterns:
+      - pattern: requests.$M(..., verify=False, ...)
+    message: "requests med verify=False stänger av TLS-certifikatverifiering."
+    languages: [python]
+    severity: WARNING

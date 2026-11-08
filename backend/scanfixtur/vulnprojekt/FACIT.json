@@ -1,0 +1,7 @@
+{
+  "beskrivning": "Ground truth för mätning. (fil, kategori) som SKA hittas.",
+  "facit": [
+    ["secrets.txt", "secret"],
+    ["app.py", "injection"]
+  ]
+}
