@@ -1,6 +1,7 @@
 # Design 0002 — Guardian enforcement adapter: Local Proxy/CLI
 
-Status: **proposed** (the five §12 gating artifacts for step 6; no implementation yet)
+Status: **approved** — the five §12 gating artifacts for step 6; decisions resolved (§9);
+no implementation yet. Model A (explicit loopback proxy) + C (CLI), proxy first, MITM rejected.
 Gates: Phase 11 step 6. Builds on [0001](0001-pre-send-guardian.md) (decision core, steps 1–5).
 Baseline: tag `v0.1.0`.
 
@@ -179,16 +180,17 @@ can plug in" reservation, made concrete.
 
 ---
 
-## 9. Decisions required before building step 6
+## 9. Decisions — RESOLVED (2026-11-09)
 
-1. **Confirm integration model A (explicit loopback proxy) + C (CLI), reject transparent
-   MITM for v1.** (§1) — the load-bearing choice.
-2. **REDACT-and-forward scope:** allow JSON-body rewrite in v1, degrade to BLOCK otherwise?
-   (§5) Recommendation: yes.
-3. **First concrete target:** proxy *or* CLI wrapper first? Both share the core; the CLI is
-   simpler to prove end-to-end. Recommendation: CLI wrapper first (fastest honest proof),
-   then the proxy — or the reverse if the proxy is the real product surface you want.
-4. **Upstream allowlist for v1** (which hosts the proxy will forward to).
+1. **Integration model = A (explicit loopback proxy) + C (CLI). Transparent MITM (B) is
+   rejected for v1.** ✅ Serrier only ever sees explicitly-routed traffic; never a system CA.
+2. **REDACT-and-forward: rewrite re-serializable JSON bodies (recompute Content-Length);
+   where a body can't be cleanly sanitized, degrade to BLOCK (logged, never silent).** ✅
+3. **First concrete target = the proxy** (the real product surface). The CLI wrapper (C)
+   follows, reusing the same decision core + `EnforcementAdapter` contract. ✅
+4. **Upstream allowlist for v1 (open):** which hosts the proxy forwards to — default set
+   proposed: `api.anthropic.com`, `api.openai.com`, `generativelanguage.googleapis.com`.
+   Confirm/trim when step 6 starts.
 
 ## 10. Definition of Done — step 6
 
