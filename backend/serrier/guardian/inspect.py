@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from serrier.core.findings import redact
 from serrier.core.textdetect import Traff
-from serrier.guardian.classify import detektera_kanslig, sensitivitet
+from serrier.guardian.classify import detektera_kanslig, normalisera, sensitivitet
 from serrier.guardian.policy import (
     STANDARD,
     AnalysisStatus,
@@ -72,8 +72,8 @@ def maska(text: str, traffar: list[Traff]) -> str:
     delar: list[str] = []
     i = 0
     for t in sorted(traffar, key=lambda x: x.start):
-        if t.start < i:
-            continue
+        if t.start < 0 or t.start < i:
+            continue                     # evasion (-1, oredakterbar → block) eller överlapp
         delar.append(text[i:t.start])
         delar.append(f"[redacted:{t.regel}]")
         i = t.slut
@@ -86,15 +86,16 @@ def inspect(text: str, *, failure_mode: FailureMode = FailureMode.balanced,
     """Inspektera utgående text lokalt. Detektion-fel → UNKNOWN (fel-läget avgör). Rå text
     lagras/loggas aldrig; bara redakterad data lämnar den här funktionen."""
     try:
-        traffar = detektera_kanslig(text)
+        norm = normalisera(text)
+        traffar = detektera_kanslig(norm)
         status = AnalysisStatus.ok
     except Exception:
-        traffar, status = [], AnalysisStatus.unknown
+        norm, traffar, status = text, [], AnalysisStatus.unknown
 
     verdict = besluta(traffar, analysis_status=status, failure_mode=failure_mode, policy=policy)
-    # safe_text redakteras alltid när något hittades — oavsett aktion — så en REDACT/WARN
-    # kan skickas vidare utan hemligheten. (Vid UNKNOWN finns inga träffar att maska.)
-    safe = maska(text, traffar)
+    # safe_text redakteras mot NORMALISERAD text (offsets gäller den). Evasion-träffar (-1)
+    # kan ej maskeras men tvingar block, så texten skickas ändå aldrig vidare.
+    safe = maska(norm, traffar)
     findings = [GuardFinding(regel=t.regel, kategori=t.kategori.value,
                              sensitivity=sensitivitet(t).name, redacted=redact(t.text),
                              start=t.start, slut=t.slut) for t in traffar]

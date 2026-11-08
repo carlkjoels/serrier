@@ -75,9 +75,11 @@ def test_absoluta_offsets_pekar_ratt_over_flera_rader() -> None:
 
 
 def test_resultat_sorterade_pa_position() -> None:
+    # Exakta träffar (start >= 0) sorteras på position; evasion-träffar (-1) ligger sist.
     text = "a@b.se och 10.0.0.1 och c@d.se"
-    pos = [t.start for t in detektera_kanslig(text)]
-    assert pos == sorted(pos)
+    exakta = [t.start for t in detektera_kanslig(text) if t.start >= 0]
+    assert exakta == sorted(exakta)
+    assert exakta == [0, 11, 24]                 # ingen falsk evasion på godartad mejl/IP-text
 
 
 def test_kategorier_korrekta() -> None:
