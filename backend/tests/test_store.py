@@ -77,3 +77,17 @@ def test_auto_verifiering_vid_omskanning() -> None:
     st.satt_status(pid, fid, Status.remediation_approved)         # användaren godkänner
     st.spara_scan(pid, [], ["builtin"])                           # omskanning: fyndet borta
     assert st.lista_findings(pid)[0]["status"] == "verified"      # risken sjönk → verified
+
+
+def test_regression_verifierat_fynd_som_aterkommer() -> None:
+    st = _store()
+    pid = _projekt(st)
+    st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])
+    fid = st.lista_findings(pid)[0]["id"]
+    st.satt_status(pid, fid, Status.remediation_approved)
+    st.spara_scan(pid, [], ["builtin"])                           # borta → verified
+    assert st.lista_findings(pid)[0]["status"] == "verified"
+    st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])          # samma fynd igen!
+    rad = st.lista_findings(pid)[0]
+    assert rad["status"] == "detected"                            # regression → öppnas igen
+    assert rad["aterkomster"] == 1                                # räknad återkomst

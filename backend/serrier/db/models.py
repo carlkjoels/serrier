@@ -81,6 +81,8 @@ class FindingRow(Base):
     evidens_json: Mapped[str] = mapped_column(Text)     # redaktad evidens
     forst_sedd: Mapped[datetime] = mapped_column(DateTime, default=_now)
     sist_sedd: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    # Antal gånger fyndet återkommit efter att ha verifierats/åtgärdats (regression).
+    aterkomster: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class AuditEvent(Base):

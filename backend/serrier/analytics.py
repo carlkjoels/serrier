@@ -50,3 +50,14 @@ def timeline(scans: list[dict]) -> list[dict]:
     """Fynd per skanning över tid — enklaste trenden (riskutveckling kräver
     historik-snapshots, en senare skiva)."""
     return [{"tid": s["tid"], "antal": s["antal"]} for s in scans]
+
+
+def reappearances(findings: list[dict]) -> list[dict]:
+    """Fynd som återkommit efter att ha verifierats/åtgärdats (regression). En fix som
+    inte höll är viktigare att veta om än ett nytt fynd — den signalerar en trasig
+    åtgärdsprocess. Sorterat på flest återkomster först."""
+    regr = [f for f in findings if f.get("aterkomster", 0) > 0]
+    regr.sort(key=lambda f: f["aterkomster"], reverse=True)
+    return [{"id": f["id"], "asset_ref": f["asset_ref"], "title": f["title"],
+             "detector": f["detector"], "severity": f["severity"],
+             "status": f["status"], "aterkomster": f["aterkomster"]} for f in regr]

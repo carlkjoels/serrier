@@ -83,6 +83,23 @@ def test_korrelationer_endpoint_och_posture_falt(tmp_path: Path) -> None:
         app.dependency_overrides.clear()
 
 
+def test_export_sarif_json_och_ogiltigt_format(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(HEMLIG_ENV)
+    c = _klient()
+    try:
+        pid = c.post("/projects", json={"namn": "demo"}).json()["project_id"]
+        c.post(f"/projects/{pid}/scan", json={"sokvag": str(tmp_path)})
+        sarif = c.get(f"/projects/{pid}/export", params={"format": "sarif"}).json()
+        assert sarif["version"] == "2.1.0"
+        assert "REALSECRET" not in str(sarif)               # ingen rå hemlighet i exporten
+        j = c.get(f"/projects/{pid}/export", params={"format": "json"}).json()
+        assert j["tool"] == "serrier"
+        assert c.get(f"/projects/{pid}/export",
+                     params={"format": "xml"}).status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_remediation_loop_godkann_och_auto_verifiera(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(HEMLIG_ENV)
     c = _klient()

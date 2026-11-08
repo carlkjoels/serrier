@@ -147,7 +147,15 @@ class Store:
                     FindingRow.project_id == project_id, FindingRow.finding_id == f.id))
                 if rad:
                     rad.sist_sedd = datetime.now(UTC)
-                    rad.evidens_json = _evidens_json(f)     # status rörs INTE (re-scan)
+                    rad.evidens_json = _evidens_json(f)
+                    # Regression: ett verifierat/åtgärdat fynd som dyker upp igen. Detta
+                    # ÄR en meningsfull händelse (fixen höll inte) → status tillbaka till
+                    # detected, räknat och auditerat. Övriga statusar rörs INTE av re-scan.
+                    if rad.status in {Status.verified.value, Status.remediated.value}:
+                        rad.aterkomster += 1
+                        self._audit(s, project_id, "aterkomst",
+                                    f"{f.id}: {rad.status} → detected (fynd återkom)")
+                        rad.status = Status.detected.value
                 else:
                     s.add(self._ny_rad(project_id, f))
             self._auto_verifiera(s, project_id, {f.id for f in findings})
@@ -216,4 +224,5 @@ class Store:
                 "severity": r.severity, "confidence": r.confidence, "status": r.status,
                 "asset_ref": r.asset_ref, "title": r.title, "rule": r.rule,
                 "risk": risk_score(f), "evidence": json.loads(r.evidens_json),
+                "aterkomster": r.aterkomster,
                 "forst_sedd": r.forst_sedd.isoformat(), "sist_sedd": r.sist_sedd.isoformat()}

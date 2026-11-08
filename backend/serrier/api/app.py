@@ -19,7 +19,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from serrier import analyst, analytics, correlation, remediation
+from serrier import analyst, analytics, correlation, export, remediation
 from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
 from serrier.db.store import Store
@@ -124,7 +124,8 @@ def posture(pid: str, store: StoreDep, p: ViewerDep) -> dict:
     fynd = store.lista_findings(pid)
     return {"posture": analytics.posture(fynd),
             "timeline": analytics.timeline(store.lista_scans(pid)),
-            "antal_korrelationer": len(correlation.korrelera(fynd))}
+            "antal_korrelationer": len(correlation.korrelera(fynd)),
+            "regressioner": analytics.reappearances(fynd)}
 
 
 @app.get("/projects/{pid}/correlations")
@@ -132,6 +133,19 @@ def correlations(pid: str, store: StoreDep, p: ViewerDep) -> list[dict]:
     """Tillgångar som flera oberoende detektorer flaggat — prioritera dessa först."""
     _kravs_projekt(store, pid, p.org_id)
     return correlation.korrelera(store.lista_findings(pid))
+
+
+@app.get("/projects/{pid}/export")
+def exportera(pid: str, store: StoreDep, p: ViewerDep, format: str = "json") -> dict:
+    """Exportera findings som SARIF 2.1.0 (CI/GitHub) eller ren JSON. Bara redaktad
+    evidens lämnar systemet — filen kan delas utan att läcka hemligheter."""
+    _kravs_projekt(store, pid, p.org_id)
+    fynd = store.lista_findings(pid)
+    if format == "sarif":
+        return export.till_sarif(fynd)
+    if format == "json":
+        return export.till_json(fynd)
+    raise HTTPException(status_code=400, detail="format måste vara 'sarif' eller 'json'")
 
 
 class StatusBegaran(BaseModel):

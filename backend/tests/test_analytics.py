@@ -5,10 +5,10 @@ from serrier import analytics
 
 
 def _f(sev: str, kat: str = "secret", det: str = "builtin", status: str = "detected",
-       risk: int = 50) -> dict:
+       risk: int = 50, aterkomster: int = 0) -> dict:
     return {"id": f"{sev}-{kat}-{risk}", "severity": sev, "confidence": "probable",
             "category": kat, "detector": det, "status": status, "risk": risk,
-            "asset_ref": "x:1", "title": "t"}
+            "asset_ref": "x:1", "title": "t", "aterkomster": aterkomster}
 
 
 def test_posture_fordelningar_och_risk() -> None:
@@ -35,6 +35,15 @@ def test_atgardade_exkluderas_ur_oppen_risk() -> None:
 def test_etikett_sager_aldrig_saker() -> None:
     assert analytics.posture([])["etikett"] == "inga öppna fynd"
     assert "säker" not in analytics.posture([])["etikett"]
+
+
+def test_reappearances_bara_regressioner_sorterat() -> None:
+    f = [_f("high", risk=80, aterkomster=0),          # aldrig återkommit → ej med
+         _f("critical", "injection", risk=90, aterkomster=1),
+         _f("low", "config", risk=10, aterkomster=3)]
+    r = analytics.reappearances(f)
+    assert len(r) == 2                                # bara de med aterkomster > 0
+    assert [x["aterkomster"] for x in r] == [3, 1]    # flest återkomster först
 
 
 def test_timeline_fran_scans() -> None:
