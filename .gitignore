@@ -26,3 +26,6 @@ data/
 
 # OS
 .DS_Store
+
+# Downloaded scanner binaries (not committed)
+backend/.tools/
