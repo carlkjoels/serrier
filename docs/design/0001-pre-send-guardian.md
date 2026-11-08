@@ -1,7 +1,10 @@
 # Design 0001 — Pre-Send Guardian
 
-Status: **in progress** — decisions locked (§12); step 1 built (shared detection core);
-steps 2–4 (decision core) next; step 6 (proxy) gated behind the §12 artifacts.
+Status: **decision core built** — steps 1–4 done (shared detection core · PII/entropy ·
+policy engine with 3 failure modes + UNKNOWN · `inspect()` + `POST /guard/inspect`). Local,
+deterministic, zero integration. Remaining before step 6 (proxy): step 5 adversarial recall
+suite; per-org policy override via API/RBAC; a formal latency benchmark. Step 6 stays gated
+behind the §12 artifacts.
 Baseline: tag `v0.1.0` (Phases 0–10). Compare every future change against it.
 Author: founding CTO analysis, 2026-11-08.
 

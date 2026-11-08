@@ -67,14 +67,19 @@ SARIF 2.1.0 output, standalone frontend build.
 Phases 0–10 are a stable, verifiable baseline. Compare future work against it; do not make
 it harder to verify.
 
-## Phase 11 — Pre-Send Guardian (prevention)  ◻ designed, not built
+## Phase 11 — Pre-Send Guardian (prevention)  ◧ decision core built (steps 1–4)
 Shift from detecting problems at rest to **preventing exposure in motion**. Design in
 [`docs/design/0001-pre-send-guardian.md`](docs/design/0001-pre-send-guardian.md). The spine
-is Detection ≠ Decision ≠ Enforcement; the MVP is a local, deterministic decision core
-(`POST /guard/inspect`) reusing the builtin detection engine — enforcement adapters come
-one at a time, each declaring whether its block is *guaranteed* or *best-effort*. Build in
-small steps (refactor shared core → classify+PII → policy → inspect → adversarial recall →
-one adapter).
+is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never "safe").
+- ✅ Step 1: shared detection core (`core/textdetect.py`), builtin refactored, behavior pinned.
+- ✅ Step 2: classification + conservative PII (Luhn-validated card/PNR, email, internal IP)
+  + entropy. Synthetic fixture: recall 1.00, FPR 0.00.
+- ✅ Step 3: deterministic policy engine + three failure modes (STRICT/BALANCED/PERMISSIVE).
+- ✅ Step 4: `inspect()` + `safe_text` + `POST /guard/inspect`. Local, deterministic.
+- ◻ Step 5: adversarial recall suite (base64/newline/split/homoglyph) + published numbers;
+  per-org policy override via RBAC; latency benchmark.
+- ◻ Step 6: **Local Proxy/CLI** enforcement adapter (guaranteed BLOCK), gated behind the
+  §12 proxy artifacts. Adapter-agnostic contract so browser-ext / Claude Code / IDE attach later.
 
 ## Target picture (NOT a backlog — a direction)
 The strategic vision (Secure AI Adoption Infrastructure: policy/model gateway, agent
