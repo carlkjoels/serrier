@@ -81,6 +81,13 @@ class Store:
             return sorted((self._till_dict(r) for r in rader),
                           key=lambda d: d["risk"], reverse=True)
 
+    def lista_scans(self, project_id: str) -> list[dict]:
+        with self._Session() as s:
+            rader = s.scalars(select(Scan).where(Scan.project_id == project_id)
+                              .order_by(Scan.tid)).all()
+            return [{"tid": r.tid.isoformat(), "antal": r.antal,
+                     "detektorer": r.detektorer} for r in rader]
+
     @staticmethod
     def _till_dict(r: FindingRow) -> dict:
         f = Finding(project_id=r.project_id, category=r.category, detector=r.detector,

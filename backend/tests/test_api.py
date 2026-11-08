@@ -52,6 +52,22 @@ def test_scan_av_icke_katalog_ger_400() -> None:
         app.dependency_overrides.clear()
 
 
+def test_posture_endpoint(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(HEMLIG_ENV)
+    c = _klient()
+    try:
+        pid = c.post("/projects", json={"namn": "demo"}).json()["project_id"]
+        c.post(f"/projects/{pid}/scan", json={"sokvag": str(tmp_path)})
+        r = c.get(f"/projects/{pid}/posture")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["posture"]["etikett"] == "kritisk"      # anthropic-nyckel = critical
+        assert body["posture"]["antal_oppna"] >= 1
+        assert len(body["timeline"]) == 1                   # en skanning körd
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_cross_project_isolering(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(HEMLIG_ENV)
     c = _klient()

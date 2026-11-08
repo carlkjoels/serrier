@@ -15,6 +15,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from serrier import analytics
 from serrier.db.store import Store
 from serrier.scanners.registry import kor_skanners, tillgangliga
 
@@ -61,3 +62,10 @@ def scan(pid: str, b: ScanBegaran, store: StoreDep) -> dict:
 def findings(pid: str, store: StoreDep) -> list[dict]:
     _kravs_projekt(store, pid)
     return store.lista_findings(pid)
+
+
+@app.get("/projects/{pid}/posture")
+def posture(pid: str, store: StoreDep) -> dict:
+    _kravs_projekt(store, pid)
+    return {"posture": analytics.posture(store.lista_findings(pid)),
+            "timeline": analytics.timeline(store.lista_scans(pid))}
