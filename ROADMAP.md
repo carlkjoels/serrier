@@ -38,10 +38,35 @@ revocation**, not just deletion. Nothing auto-applied to prod/credentials/networ
 Independent modules, only after the core is stable. Untrusted scraped content stays data;
 SSRF/egress controls enforced; authorized-only.
 
+## Phase 6 — Deployment hardening  ✅
+Postgres compatibility (testable `engine_kwargs`), Alembic migrations (own the schema in
+prod via `SERRIER_SKIP_CREATE_ALL`), Docker/Compose (backend with scanners built in,
+Next.js standalone, Postgres). A migration test asserts the schema matches the models.
+
+## Phase 7 — Auth + multi-tenant  ✅
+API keys (sha256-hashed, never stored raw, shown once), orgs as the tenant boundary,
+RBAC (viewer<member<owner), tenant isolation (wrong org → 404, never leaks existence).
+Dev mode (no keys configured) keeps the MVP friction-free.
+
+## Phase 8 — Scanner depth + correlation  ✅
+Cross-detector correlation (same asset flagged by ≥2 independent detectors → higher
+priority, never altering a single finding's confidence). semgrep registry mode and osv
+offline mode, both opt-in (network/non-determinism stays off by default).
+
+## Phase 9 — Verification depth + export  ✅
+Regression tracking: a verified/remediated finding that reappears is re-opened, counted
+(`aterkomster`) and audited — the verify loop can run backwards when a fix doesn't hold.
+SARIF 2.1.0 + JSON export (redacted evidence only — shareable without leaking).
+
+## Phase 10 — Dashboard live-verification  ✅
+Backend + frontend run end to end; dashboard surfaces correlations, regressions and
+export; API-key field for auth-on mode. Verified live: real scan, redaction holds,
+SARIF 2.1.0 output, standalone frontend build.
+
 ## Deferred on purpose (not forgotten)
-- Postgres + Docker/Compose — deployment hardening, after the MVP proves value.
-- RBAC/orgs/multi-tenant hardening — beyond single-user MVP.
-- Verification depth, repeated-vuln analytics, reporting exports.
+- Cross-detector *finding* correlation beyond same-asset (semantic dedup across rules).
+- Live browser E2E in CI; reporting exports beyond SARIF/JSON (PDF/CSV).
+- Real OSV/semgrep registry runs in CI (network-gated); key rotation/expiry for API keys.
 
 ## What "done" never means
 "Serrier says you're secure." It means: measured coverage, separated severity/confidence/

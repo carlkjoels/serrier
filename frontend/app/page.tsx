@@ -22,6 +22,7 @@ type Finding = {
   title: string;
   risk: number;
   status: string;
+  aterkomster: number;
 };
 
 type Posture = {
@@ -36,6 +37,15 @@ type Posture = {
   topp: Finding[];
 };
 
+type Regression = {
+  id: string;
+  asset_ref: string;
+  title: string;
+  detector: string;
+  severity: string;
+  aterkomster: number;
+};
+
 const SEV_FARG: Record<string, string> = {
   critical: "bg-red-600",
   high: "bg-orange-500",
@@ -47,24 +57,51 @@ const SEV_ORDNING = ["critical", "high", "medium", "low", "info"];
 
 export default function Dashboard() {
   const [pid, setPid] = useState("");
+  const [nyckel, setNyckel] = useState("");
   const [posture, setPosture] = useState<Posture | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [korrelationer, setKorrelationer] = useState(0);
+  const [regressioner, setRegressioner] = useState<Regression[]>([]);
   const [fel, setFel] = useState("");
+
+  // Nyckel (om satt) skickas som X-API-Key. I dev-läge (ingen auth) behövs ingen.
+  const hdrs = (): HeadersInit => (nyckel ? { "X-API-Key": nyckel } : {});
 
   async function ladda(id: string) {
     setFel("");
     try {
-      const pr = await fetch(`${API}/projects/${id}/posture`);
+      const pr = await fetch(`${API}/projects/${id}/posture`, { headers: hdrs() });
       if (!pr.ok) throw new Error("okänt projekt");
       const p = await pr.json();
-      const f = await fetch(`${API}/projects/${id}/findings`).then((r) => r.json());
+      const f = await fetch(`${API}/projects/${id}/findings`, { headers: hdrs() }).then(
+        (r) => r.json(),
+      );
       setPosture(p.posture);
+      setKorrelationer(p.antal_korrelationer ?? 0);
+      setRegressioner(p.regressioner ?? []);
       setFindings(f);
     } catch {
       setPosture(null);
       setFindings([]);
+      setKorrelationer(0);
+      setRegressioner([]);
       setFel(`Kunde inte hämta. Kör backend på ${API} och ange ett giltigt projekt-id.`);
     }
+  }
+
+  // Export: hämta med ev. nyckel-header och ladda ner som fil (länkar kan inte bära headers).
+  async function exportera(format: "sarif" | "json") {
+    if (!pid.trim()) return;
+    const r = await fetch(`${API}/projects/${pid.trim()}/export?format=${format}`, {
+      headers: hdrs(),
+    });
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `serrier-${pid.trim()}.${format}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const sevData = posture
@@ -84,17 +121,23 @@ export default function Dashboard() {
       </header>
 
       <form
-        className="mb-8 flex gap-2"
+        className="mb-8 flex flex-wrap gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           if (pid.trim()) ladda(pid.trim());
         }}
       >
         <input
-          className="flex-1 border-2 border-neutral-900 px-3 py-2"
+          className="min-w-[12rem] flex-1 border-2 border-neutral-900 px-3 py-2"
           placeholder="projekt-id"
           value={pid}
           onChange={(e) => setPid(e.target.value)}
+        />
+        <input
+          className="min-w-[12rem] flex-1 border-2 border-neutral-900 px-3 py-2"
+          placeholder="API-nyckel (valfri i dev)"
+          value={nyckel}
+          onChange={(e) => setNyckel(e.target.value)}
         />
         <button className="border-2 border-neutral-900 bg-neutral-900 px-4 py-2 text-white">
           Visa
@@ -105,12 +148,43 @@ export default function Dashboard() {
 
       {posture && (
         <>
-          <section className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+          <section className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-5">
             <Kort etikett="Posture" varde={posture.etikett} />
             <Kort etikett="Öppna fynd" varde={String(posture.antal_oppna)} />
             <Kort etikett="Åtgärdade" varde={String(posture.antal_atgardade)} />
-            <Kort etikett="Risk (snitt)" varde={String(posture.risk_snitt)} />
+            <Kort etikett="Korrelationer" varde={String(korrelationer)} />
+            <Kort etikett="Regressioner" varde={String(regressioner.length)} />
           </section>
+
+          <section className="mb-8 flex gap-2">
+            <button
+              onClick={() => exportera("sarif")}
+              className="border-2 border-neutral-900 px-3 py-1.5 text-sm"
+            >
+              Exportera SARIF
+            </button>
+            <button
+              onClick={() => exportera("json")}
+              className="border-2 border-neutral-900 px-3 py-1.5 text-sm"
+            >
+              Exportera JSON
+            </button>
+          </section>
+
+          {regressioner.length > 0 && (
+            <section className="mb-8 border-2 border-red-600 bg-red-50 p-3">
+              <h2 className="mb-1 text-sm font-semibold uppercase text-red-700">
+                Regressioner — fixar som inte höll
+              </h2>
+              <ul className="text-sm">
+                {regressioner.map((r) => (
+                  <li key={r.id} className="font-mono text-xs">
+                    {r.asset_ref} · {r.detector} · återkom {r.aterkomster}×
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           <section className="mb-8">
             <h2 className="mb-2 text-sm font-semibold uppercase text-neutral-500">

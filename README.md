@@ -15,13 +15,52 @@ coverage limits honestly.
 
 ## Status
 
-**Phase 0 (discovery & architecture).** No application code yet — see the planning
-docs below. This README is a pointer, not a claim of a working product.
+**Phases 0–10 built.** Full MVP loop + all four modules + deployment hardening,
+multi-tenant auth, cross-detector correlation, regression tracking and SARIF/JSON
+export. Backend: 86 tests, ruff-clean. The product never claims "secure".
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — modules, central finding schema, stack, trust boundary.
 - [`THREAT_MODEL.md`](THREAT_MODEL.md) — Serrier processes untrusted input; what can go wrong.
 - [`ROADMAP.md`](ROADMAP.md) — phased plan; the smallest meaningful MVP.
 - [`SECURITY.md`](SECURITY.md) — how Serrier secures *itself* (it follows its own advice).
+
+### What exists now
+
+| Capability | Where |
+|---|---|
+| Secret/dep/insecure-code scanning (builtin, gitleaks, semgrep, osv) | `backend/serrier/scanners/` |
+| Central Finding schema (severity/confidence/status separate, stable id, redacted evidence) | `backend/serrier/core/` |
+| SQLite→Postgres, Alembic migrations, Docker/Compose | `backend/`, `docker-compose.yml` |
+| API-key auth, orgs, RBAC (viewer/member/owner), tenant isolation | `backend/serrier/auth.py`, `api/app.py` |
+| Cross-detector correlation + regression (reappearance) tracking | `backend/serrier/correlation.py`, `db/store.py` |
+| AI analyst (Claude) + approve→rescan→verify remediation | `backend/serrier/analyst.py`, `remediation.py` |
+| Analytics, SARIF 2.1.0 / JSON export, Next.js dashboard | `backend/serrier/{analytics,export}.py`, `frontend/` |
+| Scraping (Module B) + network/VPN posture (Module C) | `backend/serrier/scanners/{scraping,natverk}.py` |
+
+## Run it
+
+**Locally (dev, SQLite, auth off):**
+
+```bash
+# backend — http://localhost:8000
+cd backend && uv run uvicorn serrier.api.app:app --reload
+
+# frontend — http://localhost:3000
+cd frontend && npm install && npm run dev
+```
+
+With no API keys configured the backend runs in dev mode (owner access, no auth) so the
+flow is friction-free. Set `SERRIER_API_KEYS=key1,key2` (or bootstrap via `POST /orgs`)
+to turn auth on; then pass the key as `Authorization: Bearer <key>` or `X-API-Key`.
+
+**Full stack (Postgres + migrations + dashboard):**
+
+```bash
+cp .env.example .env          # fill in POSTGRES_PASSWORD, optionally ANTHROPIC_API_KEY
+docker compose up --build     # db + backend (migrated) + frontend
+```
+
+**Migrations:** `cd backend && SERRIER_DB_URL=... uv run alembic upgrade head`.
 
 ## MVP scope (locked small, on purpose)
 
