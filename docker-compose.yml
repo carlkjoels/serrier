@@ -1,0 +1,42 @@
+# Serrier — lokal fullstack. `docker compose up --build` ger Postgres + backend (migrerad)
+# + dashboard. Hemligheter läses från .env (se .env.example); inget känsligt i denna fil.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: serrier
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-serrier}
+      POSTGRES_DB: serrier
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U serrier"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      SERRIER_DB_URL: postgresql+psycopg://serrier:${POSTGRES_PASSWORD:-serrier}@db:5432/serrier
+      SERRIER_SKIP_CREATE_ALL: "1"
+      SERRIER_API_KEYS: ${SERRIER_API_KEYS:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API: ${NEXT_PUBLIC_API:-http://localhost:8000}
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

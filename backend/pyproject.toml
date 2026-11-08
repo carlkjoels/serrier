@@ -10,7 +10,12 @@ dependencies = [
   "uvicorn>=0.32",
   "httpx>=0.28",
   "anthropic>=2.6.0",
+  "alembic>=1.13",
 ]
+
+[project.optional-dependencies]
+# Postgres-drivrutin — bara i container/prod. SQLite kräver ingen extra dep.
+postgres = ["psycopg[binary]>=3.2"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.7"]

@@ -6,6 +6,7 @@ tills något uttryckligen ändrar den."""
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 
 from sqlalchemy import create_engine, select
@@ -21,17 +22,25 @@ def _evidens_json(f: Finding) -> str:
     return json.dumps([e.model_dump(mode="json") for e in f.evidence])
 
 
+def engine_kwargs(url: str) -> dict:
+    """Engine-argument per backend. Ren funktion så valet kan testas utan en riktig DB.
+    SQLite i FastAPI:s trådpool måste dela anslutning (StaticPool) + tillåta åtkomst över
+    trådar; in-memory kräver det särskilt. Postgres sköter sin egen pool."""
+    if url.startswith("sqlite"):
+        kwargs: dict = {"connect_args": {"check_same_thread": False}}
+        if ":memory:" in url or url == "sqlite://":
+            kwargs["poolclass"] = StaticPool
+        return kwargs
+    # Postgres o.a.: förnya döda anslutningar innan bruk (långlivad container).
+    return {"pool_pre_ping": True}
+
+
 class Store:
     def __init__(self, url: str = "sqlite:///serrier.db") -> None:
-        # SQLite + FastAPI (trådpool): dela en anslutning (StaticPool) så alla trådar ser
-        # samma databas, och tillåt åtkomst över trådar. In-memory kräver det särskilt.
-        kwargs: dict = {}
-        if url.startswith("sqlite"):
-            kwargs["connect_args"] = {"check_same_thread": False}
-            if ":memory:" in url or url == "sqlite://":
-                kwargs["poolclass"] = StaticPool
-        self._engine = create_engine(url, **kwargs)
-        Base.metadata.create_all(self._engine)
+        self._engine = create_engine(url, **engine_kwargs(url))
+        # I prod äger Alembic schemat (SERRIER_SKIP_CREATE_ALL=1). Dev/test skapar på plats.
+        if not os.environ.get("SERRIER_SKIP_CREATE_ALL"):
+            Base.metadata.create_all(self._engine)
         self._Session: sessionmaker[Session] = sessionmaker(self._engine)
 
     def _audit(self, s: Session, project_id: str, handelse: str, detalj: str) -> None:
