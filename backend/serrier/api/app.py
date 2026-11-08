@@ -1,21 +1,26 @@
 """FastAPI — den typade ytan mot backend. MVP-flödet: skapa projekt → kör scan → lista
-findings. Allt tenant-isolerat via project_id; findings bär redaktad evidens.
+findings. Allt tenant-isolerat per ORG (Fas 7); findings bär redaktad evidens.
 
-Säkerhet: skanningssökvägen valideras som en katalog (MVP = lokal, enanvändar; i
-fleranvändar-läge krävs sandboxing, se THREAT_MODEL). Okänt projekt → 404.
+Auth: Bearer-/X-API-Key-nyckel → Principal(org, roll). Finns inga nycklar alls och
+SERRIER_REQUIRE_AUTH är osatt körs dev-läge (owner i en dev-org) så lokalt bruk är
+friktionsfritt. RBAC: viewer läser, member skannar/sätter status, owner hanterar nycklar.
+Fel org behandlas som 404 — tenant-existens läcker aldrig över gränsen.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
 from serrier import analyst, analytics, remediation
+from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
 from serrier.db.store import Store
 from serrier.scanners import natverk
@@ -28,7 +33,54 @@ def get_store() -> Store:                      # lat singleton; överskrivs i te
 
 
 StoreDep = Annotated[Store, Depends(get_store)]
-app = FastAPI(title="Serrier", version="0.0.1")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Seed owner-nycklar från env vid start (prod/compose). Osatt → inget byggs (test).
+    rå = os.environ.get("SERRIER_API_KEYS", "")
+    if rå:
+        get_store().seed_nycklar_fran_env(rå.split(","))
+    yield
+
+
+app = FastAPI(title="Serrier", version="0.0.1", lifespan=lifespan)
+
+
+# --- auth -----------------------------------------------------------------
+def _extrahera_nyckel(request: Request) -> str | None:
+    h = request.headers.get("authorization")
+    if h and h.lower().startswith("bearer "):
+        return h[7:].strip()
+    return request.headers.get("x-api-key")
+
+
+def nuvarande_principal(request: Request, store: StoreDep) -> Principal:
+    rå = _extrahera_nyckel(request)
+    if rå:
+        p = store.verifiera_nyckel(rå)
+        if p is None:
+            raise HTTPException(status_code=401, detail="ogiltig API-nyckel")
+        return p
+    if store.antal_nycklar() > 0 or os.environ.get("SERRIER_REQUIRE_AUTH"):
+        raise HTTPException(status_code=401, detail="API-nyckel krävs")
+    return Principal(org_id=store.dev_org(), roll=Roll.owner, dev=True)
+
+
+PrincipalDep = Annotated[Principal, Depends(nuvarande_principal)]
+
+
+def kravs_roll(min_roll: Roll) -> Callable[[Principal], Principal]:
+    def _check(p: PrincipalDep) -> Principal:
+        if not far(p.roll, min_roll):
+            raise HTTPException(status_code=403, detail=f"kräver roll {min_roll.name}")
+        return p
+    return _check
+
+
+ViewerDep = Annotated[Principal, Depends(kravs_roll(Roll.viewer))]
+MemberDep = Annotated[Principal, Depends(kravs_roll(Roll.member))]
+OwnerDep = Annotated[Principal, Depends(kravs_roll(Roll.owner))]
 
 
 class SkapaProjekt(BaseModel):
@@ -39,19 +91,19 @@ class ScanBegaran(BaseModel):
     sokvag: str
 
 
-def _kravs_projekt(store: Store, pid: str) -> None:
-    if not store.projekt_finns(pid):
+def _kravs_projekt(store: Store, pid: str, org_id: str) -> None:
+    if not store.projekt_finns(pid, org_id):
         raise HTTPException(status_code=404, detail="okänt projekt")
 
 
 @app.post("/projects")
-def skapa_projekt(b: SkapaProjekt, store: StoreDep) -> dict:
-    return {"project_id": store.skapa_projekt(b.namn)}
+def skapa_projekt(b: SkapaProjekt, store: StoreDep, p: MemberDep) -> dict:
+    return {"project_id": store.skapa_projekt(b.namn, p.org_id)}
 
 
 @app.post("/projects/{pid}/scan")
-def scan(pid: str, b: ScanBegaran, store: StoreDep) -> dict:
-    _kravs_projekt(store, pid)
+def scan(pid: str, b: ScanBegaran, store: StoreDep, p: MemberDep) -> dict:
+    _kravs_projekt(store, pid, p.org_id)
     rot = Path(b.sokvag)
     if not rot.is_dir():
         raise HTTPException(status_code=400, detail="sökvägen är ingen katalog")
@@ -61,14 +113,14 @@ def scan(pid: str, b: ScanBegaran, store: StoreDep) -> dict:
 
 
 @app.get("/projects/{pid}/findings")
-def findings(pid: str, store: StoreDep) -> list[dict]:
-    _kravs_projekt(store, pid)
+def findings(pid: str, store: StoreDep, p: ViewerDep) -> list[dict]:
+    _kravs_projekt(store, pid, p.org_id)
     return store.lista_findings(pid)
 
 
 @app.get("/projects/{pid}/posture")
-def posture(pid: str, store: StoreDep) -> dict:
-    _kravs_projekt(store, pid)
+def posture(pid: str, store: StoreDep, p: ViewerDep) -> dict:
+    _kravs_projekt(store, pid, p.org_id)
     return {"posture": analytics.posture(store.lista_findings(pid)),
             "timeline": analytics.timeline(store.lista_scans(pid))}
 
@@ -77,8 +129,8 @@ class StatusBegaran(BaseModel):
     status: str
 
 
-def _kravs_fynd(store: Store, pid: str, fid: str) -> dict:
-    _kravs_projekt(store, pid)
+def _kravs_fynd(store: Store, pid: str, fid: str, org_id: str) -> dict:
+    _kravs_projekt(store, pid, org_id)
     f = store.hamta_finding(pid, fid)
     if not f:
         raise HTTPException(status_code=404, detail="okänt fynd")
@@ -86,17 +138,17 @@ def _kravs_fynd(store: Store, pid: str, fid: str) -> dict:
 
 
 @app.get("/natverk/posture")
-def natverk_posture() -> dict:
+def natverk_posture(_: ViewerDep) -> dict:
     """Modul C — nätverks-/VPN-posture för DENNA maskin (ingen fjärr-prob)."""
     ss, interfaces, resolv = natverk.samla()
     return natverk.posture(ss, interfaces, resolv)
 
 
 @app.post("/projects/{pid}/findings/{fid}/atgardsforslag")
-def atgardsforslag(pid: str, fid: str, store: StoreDep) -> dict:
+def atgardsforslag(pid: str, fid: str, store: StoreDep, p: MemberDep) -> dict:
     """AI-analysten + remediation föreslår (Claude). Sätter status remediation_proposed.
     Inget appliceras — förslaget kräver uttryckligt godkännande."""
-    f = _kravs_fynd(store, pid, fid)
+    f = _kravs_fynd(store, pid, fid, p.org_id)
     analyst.ladda_nyckel()
     forslag = remediation.foresla_atgard(f)
     store.satt_status(pid, fid, Status.remediation_proposed)
@@ -104,20 +156,62 @@ def atgardsforslag(pid: str, fid: str, store: StoreDep) -> dict:
 
 
 @app.post("/projects/{pid}/findings/{fid}/godkann")
-def godkann(pid: str, fid: str, store: StoreDep) -> dict:
+def godkann(pid: str, fid: str, store: StoreDep, p: MemberDep) -> dict:
     """Människans uttryckliga godkännande. Omskanning verifierar sen om risken sjönk."""
-    _kravs_fynd(store, pid, fid)
+    _kravs_fynd(store, pid, fid, p.org_id)
     store.satt_status(pid, fid, Status.remediation_approved)
     return {"finding_id": fid, "status": Status.remediation_approved.value}
 
 
 @app.post("/projects/{pid}/findings/{fid}/status")
-def satt_status(pid: str, fid: str, b: StatusBegaran, store: StoreDep) -> dict:
+def satt_status(pid: str, fid: str, b: StatusBegaran, store: StoreDep, p: MemberDep) -> dict:
     """Explicit statusövergång (t.ex. accepted_risk, investigating)."""
-    _kravs_fynd(store, pid, fid)
+    _kravs_fynd(store, pid, fid, p.org_id)
     try:
         ny = Status(b.status)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="ogiltig status") from e
     store.satt_status(pid, fid, ny)
     return {"finding_id": fid, "status": ny.value}
+
+
+# --- org & nyckelhantering (owner) ----------------------------------------
+class SkapaOrg(BaseModel):
+    namn: str
+
+
+class SkapaNyckel(BaseModel):
+    roll: str = "member"
+    etikett: str = "api-nyckel"
+
+
+@app.post("/orgs")
+def skapa_org(b: SkapaOrg, store: StoreDep) -> dict:
+    """Bootstrappa en org + dess första owner-nyckel. Öppen bara i dev-läge (ingen auth
+    konfigurerad); när nycklar finns krävs en owner-nyckel för att skapa fler orgar."""
+    if store.antal_nycklar() > 0:
+        raise HTTPException(status_code=403, detail="orgskapande kräver owner-nyckel i prod")
+    org_id = store.skapa_org(b.namn)
+    rå = store.skapa_nyckel(org_id, Roll.owner, "bootstrap owner")
+    return {"org_id": org_id, "api_key": rå,
+            "obs": "nyckeln visas EN gång — spara den nu, den kan inte återställas"}
+
+
+@app.post("/orgs/{oid}/keys")
+def skapa_nyckel(oid: str, b: SkapaNyckel, store: StoreDep, p: OwnerDep) -> dict:
+    if oid != p.org_id:
+        raise HTTPException(status_code=404, detail="okänd org")
+    try:
+        roll = Roll.fran_namn(b.roll)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="ogiltig roll") from e
+    rå = store.skapa_nyckel(oid, roll, b.etikett)
+    return {"api_key": rå, "roll": roll.name,
+            "obs": "nyckeln visas EN gång — spara den nu, den kan inte återställas"}
+
+
+@app.get("/orgs/{oid}/keys")
+def lista_nycklar(oid: str, store: StoreDep, p: OwnerDep) -> list[dict]:
+    if oid != p.org_id:
+        raise HTTPException(status_code=404, detail="okänd org")
+    return store.lista_nycklar(oid)   # metadata, aldrig hash/rå nyckel

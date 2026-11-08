@@ -26,9 +26,31 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+class Org(Base):
+    """Tenant-gränsen. Projekt, findings och nycklar isoleras per org."""
+    __tablename__ = "org"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    namn: Mapped[str] = mapped_column(String)
+    skapad: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class ApiKey(Base):
+    """En API-nyckel. Vi lagrar BARA sha256-hashen — den råa nyckeln visas en gång vid
+    skapandet och går aldrig att återställa (samma princip som exponerade hemligheter:
+    bevis, inte kvitto). Rollen avgör behörighet."""
+    __tablename__ = "api_key"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("org.id"), index=True)
+    nyckel_hash: Mapped[str] = mapped_column(String, unique=True, index=True)
+    roll: Mapped[str] = mapped_column(String)
+    etikett: Mapped[str] = mapped_column(String)
+    skapad: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
 class Project(Base):
     __tablename__ = "project"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("org.id"), index=True)
     namn: Mapped[str] = mapped_column(String)
     skapad: Mapped[datetime] = mapped_column(DateTime, default=_now)
 

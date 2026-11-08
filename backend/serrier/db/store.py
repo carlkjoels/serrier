@@ -9,13 +9,17 @@ import json
 import os
 from datetime import UTC, datetime
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from serrier import auth
+from serrier.auth import Principal, Roll
 from serrier.core.findings import Finding, Status
 from serrier.core.risk import risk_score
-from serrier.db.models import AuditEvent, Base, FindingRow, Project, Scan
+from serrier.db.models import ApiKey, AuditEvent, Base, FindingRow, Org, Project, Scan
+
+_DEV_ORG_ID = "dev-org"   # stabil id för dev-läges-orgen (ingen auth konfigurerad)
 
 
 def _evidens_json(f: Finding) -> str:
@@ -46,18 +50,92 @@ class Store:
     def _audit(self, s: Session, project_id: str, handelse: str, detalj: str) -> None:
         s.add(AuditEvent(project_id=project_id, handelse=handelse, detalj=detalj))
 
-    def skapa_projekt(self, namn: str) -> str:
+    # --- org & auth (Fas 7) -------------------------------------------------
+    def skapa_org(self, namn: str) -> str:
         with self._Session() as s:
-            p = Project(namn=namn)
+            o = Org(namn=namn)
+            s.add(o)
+            s.flush()
+            self._audit(s, o.id, "org_skapad", namn)
+            s.commit()
+            return o.id
+
+    def dev_org(self) -> str:
+        """Hämta-eller-skapa dev-läges-orgen (stabil id). Används bara när ingen auth
+        är konfigurerad — alla dev-anrop delar denna tenant."""
+        with self._Session() as s:
+            if s.get(Org, _DEV_ORG_ID) is None:
+                s.add(Org(id=_DEV_ORG_ID, namn="dev"))
+                s.commit()
+        return _DEV_ORG_ID
+
+    def antal_nycklar(self) -> int:
+        with self._Session() as s:
+            return s.scalar(select(func.count()).select_from(ApiKey)) or 0
+
+    def skapa_nyckel(self, org_id: str, roll: Roll, etikett: str) -> str:
+        """Skapar en nyckel och returnerar den RÅA strängen EN gång. Bara hashen sparas."""
+        rå = auth.generera_nyckel()
+        with self._Session() as s:
+            s.add(ApiKey(org_id=org_id, nyckel_hash=auth.hasha(rå),
+                         roll=roll.name, etikett=etikett))
+            self._audit(s, org_id, "nyckel_skapad", f"{etikett} ({roll.name})")
+            s.commit()
+        return rå
+
+    def verifiera_nyckel(self, rå_nyckel: str) -> Principal | None:
+        """Slå upp en rå nyckel via dess hash → Principal, annars None."""
+        with self._Session() as s:
+            rad = s.scalar(select(ApiKey).where(ApiKey.nyckel_hash == auth.hasha(rå_nyckel)))
+            if rad is None:
+                return None
+            return Principal(org_id=rad.org_id, roll=Roll.fran_namn(rad.roll))
+
+    def lista_nycklar(self, org_id: str) -> list[dict]:
+        """Metadata om nycklar — aldrig hash eller rå nyckel."""
+        with self._Session() as s:
+            rader = s.scalars(select(ApiKey).where(ApiKey.org_id == org_id)).all()
+            return [{"id": r.id, "etikett": r.etikett, "roll": r.roll,
+                     "skapad": r.skapad.isoformat()} for r in rader]
+
+    def seed_nycklar_fran_env(self, råa: list[str]) -> str | None:
+        """Startup-seed: ger varje medskickad rå nyckel owner-roll i en gemensam
+        'bootstrap'-org, om den inte redan finns. Idempotent (hoppar kända hashar)."""
+        råa = [k.strip() for k in råa if k.strip()]
+        if not råa:
+            return None
+        with self._Session() as s:
+            org = s.scalar(select(Org).where(Org.namn == "bootstrap"))
+            if org is None:
+                org = Org(namn="bootstrap")
+                s.add(org)
+                s.flush()
+            for rå in råa:
+                h = auth.hasha(rå)
+                if s.scalar(select(ApiKey).where(ApiKey.nyckel_hash == h)) is None:
+                    s.add(ApiKey(org_id=org.id, nyckel_hash=h, roll=Roll.owner.name,
+                                 etikett="bootstrap (env)"))
+            s.commit()
+            return org.id
+
+    # --- projekt (nu org-scopade) ------------------------------------------
+    def skapa_projekt(self, namn: str, org_id: str) -> str:
+        with self._Session() as s:
+            p = Project(namn=namn, org_id=org_id)
             s.add(p)
             s.flush()
-            self._audit(s, p.id, "projekt_skapat", namn)
+            self._audit(s, p.id, "projekt_skapat", f"{namn} (org {org_id})")
             s.commit()
             return p.id
 
-    def projekt_finns(self, project_id: str) -> bool:
+    def projekt_finns(self, project_id: str, org_id: str | None = None) -> bool:
+        """Finns projektet — och, om org_id ges, tillhör det den orgen? Fel org
+        behandlas som 'finns inte' (läcker inte existens över tenant-gränsen)."""
         with self._Session() as s:
-            return s.get(Project, project_id) is not None
+            p = s.get(Project, project_id)
+            if p is None:
+                return False
+            return org_id is None or p.org_id == org_id
 
     def spara_scan(self, project_id: str, findings: list[Finding], detektorer: list[str]) -> str:
         with self._Session() as s:

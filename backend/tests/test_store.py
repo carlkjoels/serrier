@@ -15,9 +15,14 @@ def _store() -> Store:
     return Store("sqlite:///:memory:")
 
 
+def _projekt(st: Store, namn: str = "demo") -> str:
+    """Projekt under en färsk org (Fas 7: projekt är org-scopade)."""
+    return st.skapa_projekt(namn, st.skapa_org("t"))
+
+
 def test_spara_och_lista() -> None:
     st = _store()
-    pid = st.skapa_projekt("demo")
+    pid = _projekt(st)
     st.spara_scan(pid, [_f(pid, ".env:1"), _f(pid, ".env:2")], ["builtin"])
     fynd = st.lista_findings(pid)
     assert len(fynd) == 2
@@ -26,7 +31,7 @@ def test_spara_och_lista() -> None:
 
 def test_omskanning_dubblar_inte() -> None:
     st = _store()
-    pid = st.skapa_projekt("demo")
+    pid = _projekt(st)
     st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])
     st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])     # samma brist igen
     assert len(st.lista_findings(pid)) == 1                  # upsert, inte dubblering
@@ -34,8 +39,8 @@ def test_omskanning_dubblar_inte() -> None:
 
 def test_tenant_isolering() -> None:
     st = _store()
-    a = st.skapa_projekt("a")
-    b = st.skapa_projekt("b")
+    a = _projekt(st, "a")
+    b = _projekt(st, "b")
     st.spara_scan(a, [_f(a, ".env:1")], ["builtin"])
     st.spara_scan(b, [_f(b, "secrets.py:9")], ["builtin"])
     fa = st.lista_findings(a)
@@ -44,16 +49,19 @@ def test_tenant_isolering() -> None:
     assert all(d["asset_ref"] != "secrets.py:9" for d in fa)
 
 
-def test_projekt_finns() -> None:
+def test_projekt_finns_och_org_scoping() -> None:
     st = _store()
-    pid = st.skapa_projekt("x")
+    org = st.skapa_org("t")
+    pid = st.skapa_projekt("x", org)
     assert st.projekt_finns(pid) is True
+    assert st.projekt_finns(pid, org) is True
+    assert st.projekt_finns(pid, "annan-org") is False      # fel org → finns inte
     assert st.projekt_finns("okänt") is False
 
 
 def test_satt_status_explicit() -> None:
     st = _store()
-    pid = st.skapa_projekt("demo")
+    pid = _projekt(st)
     st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])
     fid = st.lista_findings(pid)[0]["id"]
     assert st.satt_status(pid, fid, Status.remediation_approved) is True
@@ -63,7 +71,7 @@ def test_satt_status_explicit() -> None:
 
 def test_auto_verifiering_vid_omskanning() -> None:
     st = _store()
-    pid = st.skapa_projekt("demo")
+    pid = _projekt(st)
     st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])          # fyndet finns
     fid = st.lista_findings(pid)[0]["id"]
     st.satt_status(pid, fid, Status.remediation_approved)         # användaren godkänner
