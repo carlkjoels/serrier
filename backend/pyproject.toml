@@ -9,6 +9,7 @@ dependencies = [
   "sqlalchemy>=2.0",
   "uvicorn>=0.32",
   "httpx>=0.28",
+  "anthropic>=2.6.0",
 ]
 
 [dependency-groups]

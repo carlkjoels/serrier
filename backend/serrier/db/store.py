@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from serrier.core.findings import Finding
+from serrier.core.findings import Finding, Status
 from serrier.core.risk import risk_score
 from serrier.db.models import AuditEvent, Base, FindingRow, Project, Scan
 
@@ -63,9 +63,35 @@ class Store:
                     rad.evidens_json = _evidens_json(f)     # status rörs INTE (re-scan)
                 else:
                     s.add(self._ny_rad(project_id, f))
+            self._auto_verifiera(s, project_id, {f.id for f in findings})
             self._audit(s, project_id, "scan", f"{len(findings)} findings")
             s.commit()
             return scan.id
+
+    def _auto_verifiera(self, s: Session, project_id: str, nuvarande: set[str]) -> None:
+        """Åtgärd→verifiering stängs av en omskanning: en GODKÄND åtgärd vars fynd inte
+        längre finns → risken sjönk faktiskt → verified. (Detect→…→Verify-loopen.)"""
+        godkanda = s.scalars(select(FindingRow).where(
+            FindingRow.project_id == project_id,
+            FindingRow.status == Status.remediation_approved.value)).all()
+        for rad in godkanda:
+            if rad.finding_id not in nuvarande:
+                rad.status = Status.verified.value
+                self._audit(s, project_id, "verifierad",
+                            f"{rad.finding_id}: borta efter omskanning → verified")
+
+    def satt_status(self, project_id: str, finding_id: str, ny_status: Status) -> bool:
+        """Explicit, auditerad statusövergång (människans hand i loopen: utreda, godkänna,
+        acceptera risk). Ingen LLM och ingen omskanning sätter detta tyst."""
+        with self._Session() as s:
+            rad = s.scalar(select(FindingRow).where(
+                FindingRow.project_id == project_id, FindingRow.finding_id == finding_id))
+            if not rad:
+                return False
+            self._audit(s, project_id, "status", f"{finding_id}: {rad.status} → {ny_status.value}")
+            rad.status = ny_status.value
+            s.commit()
+            return True
 
     @staticmethod
     def _ny_rad(project_id: str, f: Finding) -> FindingRow:
@@ -80,6 +106,12 @@ class Store:
                 FindingRow.project_id == project_id)).all()
             return sorted((self._till_dict(r) for r in rader),
                           key=lambda d: d["risk"], reverse=True)
+
+    def hamta_finding(self, project_id: str, finding_id: str) -> dict | None:
+        with self._Session() as s:
+            rad = s.scalar(select(FindingRow).where(
+                FindingRow.project_id == project_id, FindingRow.finding_id == finding_id))
+            return self._till_dict(rad) if rad else None
 
     def lista_scans(self, project_id: str) -> list[dict]:
         with self._Session() as s:

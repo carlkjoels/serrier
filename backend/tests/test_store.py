@@ -49,3 +49,23 @@ def test_projekt_finns() -> None:
     pid = st.skapa_projekt("x")
     assert st.projekt_finns(pid) is True
     assert st.projekt_finns("okänt") is False
+
+
+def test_satt_status_explicit() -> None:
+    st = _store()
+    pid = st.skapa_projekt("demo")
+    st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])
+    fid = st.lista_findings(pid)[0]["id"]
+    assert st.satt_status(pid, fid, Status.remediation_approved) is True
+    assert st.lista_findings(pid)[0]["status"] == "remediation_approved"
+    assert st.satt_status(pid, "okänt", Status.verified) is False
+
+
+def test_auto_verifiering_vid_omskanning() -> None:
+    st = _store()
+    pid = st.skapa_projekt("demo")
+    st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])          # fyndet finns
+    fid = st.lista_findings(pid)[0]["id"]
+    st.satt_status(pid, fid, Status.remediation_approved)         # användaren godkänner
+    st.spara_scan(pid, [], ["builtin"])                           # omskanning: fyndet borta
+    assert st.lista_findings(pid)[0]["status"] == "verified"      # risken sjönk → verified

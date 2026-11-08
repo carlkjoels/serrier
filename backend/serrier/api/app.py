@@ -15,7 +15,8 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from serrier import analytics
+from serrier import analyst, analytics, remediation
+from serrier.core.findings import Status
 from serrier.db.store import Store
 from serrier.scanners.registry import kor_skanners, tillgangliga
 
@@ -69,3 +70,46 @@ def posture(pid: str, store: StoreDep) -> dict:
     _kravs_projekt(store, pid)
     return {"posture": analytics.posture(store.lista_findings(pid)),
             "timeline": analytics.timeline(store.lista_scans(pid))}
+
+
+class StatusBegaran(BaseModel):
+    status: str
+
+
+def _kravs_fynd(store: Store, pid: str, fid: str) -> dict:
+    _kravs_projekt(store, pid)
+    f = store.hamta_finding(pid, fid)
+    if not f:
+        raise HTTPException(status_code=404, detail="okänt fynd")
+    return f
+
+
+@app.post("/projects/{pid}/findings/{fid}/atgardsforslag")
+def atgardsforslag(pid: str, fid: str, store: StoreDep) -> dict:
+    """AI-analysten + remediation föreslår (Claude). Sätter status remediation_proposed.
+    Inget appliceras — förslaget kräver uttryckligt godkännande."""
+    f = _kravs_fynd(store, pid, fid)
+    analyst.ladda_nyckel()
+    forslag = remediation.foresla_atgard(f)
+    store.satt_status(pid, fid, Status.remediation_proposed)
+    return forslag
+
+
+@app.post("/projects/{pid}/findings/{fid}/godkann")
+def godkann(pid: str, fid: str, store: StoreDep) -> dict:
+    """Människans uttryckliga godkännande. Omskanning verifierar sen om risken sjönk."""
+    _kravs_fynd(store, pid, fid)
+    store.satt_status(pid, fid, Status.remediation_approved)
+    return {"finding_id": fid, "status": Status.remediation_approved.value}
+
+
+@app.post("/projects/{pid}/findings/{fid}/status")
+def satt_status(pid: str, fid: str, b: StatusBegaran, store: StoreDep) -> dict:
+    """Explicit statusövergång (t.ex. accepted_risk, investigating)."""
+    _kravs_fynd(store, pid, fid)
+    try:
+        ny = Status(b.status)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="ogiltig status") from e
+    store.satt_status(pid, fid, ny)
+    return {"finding_id": fid, "status": ny.value}
