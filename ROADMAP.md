@@ -79,11 +79,13 @@ is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never
 - ✅ Step 5: evasion resistance (homoglyph/zero-width/whitespace/base64/CRLF) + adversarial
   recall suite (9/9 defended → 1.00, honest undefended list) + latency (0.8ms median) +
   per-org policy override via RBAC.
-- ◻ Step 6: **Local Proxy/CLI** enforcement adapter (guaranteed BLOCK). Gating artifacts
-  designed in [`docs/design/0002-guardian-proxy-adapter.md`](docs/design/0002-guardian-proxy-adapter.md)
-  (threat model, bypass, TLS/sensitive-data, failure handling, controlled-upstream
-  verification, covered-paths). Integration model: explicit loopback proxy + CLI — **not**
-  transparent TLS MITM. Adapter-agnostic contract so browser-ext / Claude Code / IDE attach later.
+- ◧ Step 6: **Local Proxy** enforcement adapter built (guaranteed BLOCK). Explicit loopback
+  proxy, strict allowlist (anthropic/openai/gemini), SSRF/DNS-rebinding guard, no redirects,
+  verifying TLS, no raw body logged, three-mode failure + UNKNOWN honesty, REDACT=safe JSON
+  rewrite else BLOCK. **Verified vs controlled upstream: leak-through = 0.** `EnforcementAdapter`
+  contract so browser-ext / Claude Code / IDE attach later. Design + gating artifacts:
+  [`docs/design/0002-guardian-proxy-adapter.md`](docs/design/0002-guardian-proxy-adapter.md).
+  CLI wrapper (model C) still to come. **Transparent TLS MITM rejected.**
 
 ## Target picture (NOT a backlog — a direction)
 The strategic vision (Secure AI Adoption Infrastructure: policy/model gateway, agent

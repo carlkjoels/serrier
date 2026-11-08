@@ -1,9 +1,10 @@
 # Design 0002 — Guardian enforcement adapter: Local Proxy/CLI
 
-Status: **approved** — the five §12 gating artifacts for step 6; decisions resolved (§9);
-no implementation yet. Model A (explicit loopback proxy) + C (CLI), proxy first, MITM rejected.
-Gates: Phase 11 step 6. Builds on [0001](0001-pre-send-guardian.md) (decision core, steps 1–5).
-Baseline: tag `v0.1.0`.
+Status: **built** — the proxy (model A) is implemented and verified against a controlled
+upstream: leak-through = 0 for blocked cases, byte-identical passthrough for clean traffic,
+safe JSON redact-or-block, SSRF/DNS-rebinding/allowlist/UNKNOWN defenses tested. 25 Guardian
+tests incl. a leak-through battery. CLI wrapper (model C) still to come. Decisions resolved
+(§9). Builds on [0001](0001-pre-send-guardian.md) (decision core, steps 1–5). Baseline `v0.1.0`.
 
 0001 built the decision core: `inspect(text) → GuardDecision` (local, deterministic, evasion-
 hardened). This document is what must exist **before** we build the first *enforcement*
