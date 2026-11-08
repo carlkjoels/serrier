@@ -95,6 +95,22 @@ STANDARD = Policy({
 })
 
 
+def policy_till_dict(p: Policy) -> dict[str, str]:
+    return {s.name: a.value for s, a in p.tabell.items()}
+
+
+def policy_fran_dict(d: dict) -> Policy:
+    """Bygg en Policy ur {sensitivitet_namn: aktion}. Partiell → fylls ut med STANDARD.
+    Ogiltiga namn/aktioner → ValueError (API:t översätter till 400)."""
+    tabell = dict(STANDARD.tabell)
+    for namn, aktion in d.items():
+        try:
+            tabell[Sensitivity[namn]] = GuardAction(aktion)
+        except (KeyError, ValueError) as e:
+            raise ValueError(f"ogiltig policy-post: {namn}={aktion}") from e
+    return Policy(tabell)
+
+
 def _reason(t: Traff, action: GuardAction) -> Reason:
     s = sensitivitet(t)
     txt = f"{t.regel} ({t.kategori.value}, sensitivitet {s.name}) → {action.value}"

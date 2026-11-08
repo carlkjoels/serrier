@@ -17,7 +17,23 @@ from serrier import auth
 from serrier.auth import Principal, Roll
 from serrier.core.findings import Finding, Status
 from serrier.core.risk import risk_score
-from serrier.db.models import ApiKey, AuditEvent, Base, FindingRow, Org, Project, Scan
+from serrier.db.models import (
+    ApiKey,
+    AuditEvent,
+    Base,
+    FindingRow,
+    GuardPolicy,
+    Org,
+    Project,
+    Scan,
+)
+from serrier.guardian.policy import (
+    STANDARD,
+    FailureMode,
+    Policy,
+    policy_fran_dict,
+    policy_till_dict,
+)
 
 _DEV_ORG_ID = "dev-org"   # stabil id för dev-läges-orgen (ingen auth konfigurerad)
 
@@ -117,6 +133,27 @@ class Store:
                                  etikett="bootstrap (env)"))
             s.commit()
             return org.id
+
+    # --- Guardian-policy per org (Fas 11, steg 5) --------------------------
+    def satt_guard_policy(self, org_id: str, policy: Policy, failure_mode: FailureMode) -> None:
+        with self._Session() as s:
+            js = json.dumps(policy_till_dict(policy))
+            rad = s.get(GuardPolicy, org_id)
+            if rad:
+                rad.tabell_json, rad.failure_mode = js, failure_mode.value
+            else:
+                s.add(GuardPolicy(org_id=org_id, tabell_json=js,
+                                  failure_mode=failure_mode.value))
+            self._audit(s, org_id, "guard_policy", f"fel-läge {failure_mode.value}")
+            s.commit()
+
+    def hamta_guard_policy(self, org_id: str) -> tuple[Policy, FailureMode]:
+        """Orgens policy, eller STANDARD + balanced om ingen satts."""
+        with self._Session() as s:
+            rad = s.get(GuardPolicy, org_id)
+            if rad is None:
+                return STANDARD, FailureMode.balanced
+            return policy_fran_dict(json.loads(rad.tabell_json)), FailureMode(rad.failure_mode)
 
     # --- projekt (nu org-scopade) ------------------------------------------
     def skapa_projekt(self, namn: str, org_id: str) -> str:

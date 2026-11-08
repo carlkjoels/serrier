@@ -24,7 +24,11 @@ from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
 from serrier.db.store import Store
 from serrier.guardian.inspect import inspect as guard_inspect
-from serrier.guardian.policy import FailureMode
+from serrier.guardian.policy import (
+    FailureMode,
+    policy_fran_dict,
+    policy_till_dict,
+)
 from serrier.scanners import natverk
 from serrier.scanners.registry import kor_skanners, tillgangliga
 
@@ -171,20 +175,47 @@ def natverk_posture(_: ViewerDep) -> dict:
 
 class GuardBegaran(BaseModel):
     text: str
-    failure_mode: str = "balanced"
+    failure_mode: str | None = None          # None → orgens inställda fel-läge
 
 
 @app.post("/guard/inspect")
-def guard_inspect_endpoint(b: GuardBegaran, _: ViewerDep) -> dict:
+def guard_inspect_endpoint(b: GuardBegaran, store: StoreDep, p: ViewerDep) -> dict:
     """Pre-Send Guardian — inspektera utgående text lokalt innan den skickas till en AI-
-    tjänst. Deterministiskt beslut (detektion→policy→safe_text). Den RÅA texten
-    persisteras eller loggas ALDRIG; bara redakterad data returneras. Detektion-fel →
-    analysis_status=unknown (fel-läget avgör), aldrig tyst 'godkänt'."""
+    tjänst. Använder ORGENS policy + fel-läge (eller STANDARD). Deterministiskt beslut
+    (detektion→policy→safe_text). Den RÅA texten persisteras eller loggas ALDRIG; bara
+    redakterad data returneras. Detektion-fel → analysis_status=unknown, aldrig tyst 'godkänt'."""
+    policy, org_mode = store.hamta_guard_policy(p.org_id)
+    mode = org_mode
+    if b.failure_mode is not None:
+        try:
+            mode = FailureMode(b.failure_mode)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="ogiltigt failure_mode") from e
+    return guard_inspect(b.text, failure_mode=mode, policy=policy).som_dict()
+
+
+class GuardPolicyBegaran(BaseModel):
+    tabell: dict[str, str] = {}              # sensitivitet → aktion (partiell OK)
+    failure_mode: str = "balanced"
+
+
+@app.get("/guard/policy")
+def hamta_guard_policy(store: StoreDep, p: ViewerDep) -> dict:
+    policy, mode = store.hamta_guard_policy(p.org_id)
+    return {"tabell": policy_till_dict(policy), "failure_mode": mode.value}
+
+
+@app.put("/guard/policy")
+def satt_guard_policy(b: GuardPolicyBegaran, store: StoreDep, p: OwnerDep) -> dict:
+    """Owner sätter orgens Guardian-policy (sensitivitet→aktion + fel-läge). Partiell
+    tabell fylls ut med STANDARD."""
     try:
+        policy = policy_fran_dict(b.tabell)
         mode = FailureMode(b.failure_mode)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail="ogiltigt failure_mode") from e
-    return guard_inspect(b.text, failure_mode=mode).som_dict()
+        raise HTTPException(status_code=400, detail="ogiltig policy") from e
+    store.satt_guard_policy(p.org_id, policy, mode)
+    return {"tabell": policy_till_dict(policy), "failure_mode": mode.value}
 
 
 @app.post("/projects/{pid}/findings/{fid}/atgardsforslag")

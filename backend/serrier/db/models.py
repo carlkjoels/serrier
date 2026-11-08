@@ -47,6 +47,15 @@ class ApiKey(Base):
     skapad: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class GuardPolicy(Base):
+    """Pre-Send Guardian-policy per org: sensitivitet→aktion-tabell (JSON) + fel-läge.
+    En rad per org; saknas den → STANDARD-policy + balanced."""
+    __tablename__ = "guard_policy"
+    org_id: Mapped[str] = mapped_column(ForeignKey("org.id"), primary_key=True)
+    tabell_json: Mapped[str] = mapped_column(Text)
+    failure_mode: Mapped[str] = mapped_column(String)
+
+
 class Project(Base):
     __tablename__ = "project"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
