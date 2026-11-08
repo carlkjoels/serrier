@@ -63,6 +63,25 @@ Backend + frontend run end to end; dashboard surfaces correlations, regressions 
 export; API-key field for auth-on mode. Verified live: real scan, redaction holds,
 SARIF 2.1.0 output, standalone frontend build.
 
+## Milestone — `v0.1.0` (tag)
+Phases 0–10 are a stable, verifiable baseline. Compare future work against it; do not make
+it harder to verify.
+
+## Phase 11 — Pre-Send Guardian (prevention)  ◻ designed, not built
+Shift from detecting problems at rest to **preventing exposure in motion**. Design in
+[`docs/design/0001-pre-send-guardian.md`](docs/design/0001-pre-send-guardian.md). The spine
+is Detection ≠ Decision ≠ Enforcement; the MVP is a local, deterministic decision core
+(`POST /guard/inspect`) reusing the builtin detection engine — enforcement adapters come
+one at a time, each declaring whether its block is *guaranteed* or *best-effort*. Build in
+small steps (refactor shared core → classify+PII → policy → inspect → adversarial recall →
+one adapter).
+
+## Target picture (NOT a backlog — a direction)
+The strategic vision (Secure AI Adoption Infrastructure: policy/model gateway, agent
+governance, enterprise control plane, Serrier Secure Environments / air-gap) is a *target*,
+deliberately gated behind the Guardian earning a real user. Scope explosion is the primary
+product risk (design doc R1). Nothing here is built until the prevention MVP is validated.
+
 ## Deferred on purpose (not forgotten)
 - Cross-detector *finding* correlation beyond same-asset (semantic dedup across rules).
 - Live browser E2E in CI; reporting exports beyond SARIF/JSON (PDF/CSV).
