@@ -1,0 +1,28 @@
+# Secrets & env — never commit (this is a security product)
+.env
+.env.*
+*.key
+*.pem
+secrets/
+nyckelvalv.json
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+dist/
+
+# Local data / db
+*.sqlite
+*.db
+*.duckdb
+data/
+
+# OS
+.DS_Store
