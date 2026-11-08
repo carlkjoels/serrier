@@ -23,6 +23,8 @@ from serrier import analyst, analytics, correlation, export, remediation
 from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
 from serrier.db.store import Store
+from serrier.guardian.inspect import inspect as guard_inspect
+from serrier.guardian.policy import FailureMode
 from serrier.scanners import natverk
 from serrier.scanners.registry import kor_skanners, tillgangliga
 
@@ -165,6 +167,24 @@ def natverk_posture(_: ViewerDep) -> dict:
     """Modul C — nätverks-/VPN-posture för DENNA maskin (ingen fjärr-prob)."""
     ss, interfaces, resolv = natverk.samla()
     return natverk.posture(ss, interfaces, resolv)
+
+
+class GuardBegaran(BaseModel):
+    text: str
+    failure_mode: str = "balanced"
+
+
+@app.post("/guard/inspect")
+def guard_inspect_endpoint(b: GuardBegaran, _: ViewerDep) -> dict:
+    """Pre-Send Guardian — inspektera utgående text lokalt innan den skickas till en AI-
+    tjänst. Deterministiskt beslut (detektion→policy→safe_text). Den RÅA texten
+    persisteras eller loggas ALDRIG; bara redakterad data returneras. Detektion-fel →
+    analysis_status=unknown (fel-läget avgör), aldrig tyst 'godkänt'."""
+    try:
+        mode = FailureMode(b.failure_mode)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="ogiltigt failure_mode") from e
+    return guard_inspect(b.text, failure_mode=mode).som_dict()
 
 
 @app.post("/projects/{pid}/findings/{fid}/atgardsforslag")
