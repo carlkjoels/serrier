@@ -1,45 +1,23 @@
 """Inbyggd secret/.env-skanner. Kräver INGET externt verktyg (alltid tillgänglig) —
-golvet som gör produkten användbar även utan gitleaks. Regex över textfiler; innehållet
-körs aldrig (otrodd data). Redaktion sker vid detektion — rå hemlighet lämnar aldrig
-den här modulen. Konservativ: placeholders/env-referenser flaggas inte (falskt-positiv-
-reducering)."""
+golvet som gör produkten användbar även utan gitleaks. Innehållet körs aldrig (otrodd
+data). Redaktion sker vid detektion — rå hemlighet lämnar aldrig den här modulen.
+
+Mönstren + placeholder-filtret + span-anspråket bor nu i den delade kärnan
+core/textdetect.py (Design 0001, steg 1), som också Pre-Send Guardian använder. Den här
+skannern är tunn: vandra filträdet, mata varje rad genom kärnan, bygg Findings. Beteendet
+är oförändrat (pinnat av tester)."""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from serrier.core.findings import Category, Confidence, Evidence, Finding, Severity
+from serrier.core import textdetect
+from serrier.core.findings import Evidence, Finding
 from serrier.scanners.base import inom_roten
-
-# (regel-id, mönster, severity, confidence). Specifika nyckel-format = hög confidence;
-# generisk "secret = ..." = heuristik (osäkrare, oftare falskt positiv).
-_MONSTER: list[tuple[str, re.Pattern[str], Severity, Confidence]] = [
-    ("anthropic-api-key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{20,}"),
-     Severity.critical, Confidence.confirmed),
-    ("openai-api-key", re.compile(r"sk-(?!ant-)[A-Za-z0-9]{20,}"),
-     Severity.critical, Confidence.probable),
-    ("aws-access-key-id", re.compile(r"AKIA[0-9A-Z]{16}"),
-     Severity.critical, Confidence.confirmed),
-    ("private-key-block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
-     Severity.critical, Confidence.confirmed),
-    ("generic-secret-assignment",
-     re.compile(r"""(?i)(?:password|secret|token|api[_-]?key|passwd)\s*[=:]\s*['"]?([^\s'"]{8,})"""),
-     Severity.high, Confidence.heuristic),
-]
-
-# Värden som nästan säkert INTE är en riktig hemlighet (reducerar falska positiva).
-_PLACEHOLDER = re.compile(
-    r"(?i)(your_|changeme|example|placeholder|dummy|xxx|\$\{|<[^>]+>|os\.environ|"
-    r"process\.env|getenv|redacted|\*\*\*)")
 
 _HOPPA_KATALOG = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next",
                   "dist", ".ruff_cache", ".pytest_cache", ".tools"}
 _MAX_FIL = 1_000_000   # 1 MB — större filer hoppas (resursgräns, THREAT_MODEL T8)
-
-
-def _ar_placeholder(trafftext: str) -> bool:
-    return bool(_PLACEHOLDER.search(trafftext))
 
 
 class InbyggdHemlighetsskanner:
@@ -67,18 +45,13 @@ class InbyggdHemlighetsskanner:
         rel = fil.relative_to(rot).as_posix()
         ut: list[Finding] = []
         for radnr, rad in enumerate(rader, 1):
-            klamda: list[tuple[int, int]] = []       # redan täckta spann (specifika först)
-            for regel, monster, sev, konf in _MONSTER:
-                for m in monster.finditer(rad):
-                    s, e = m.span()
-                    if _ar_placeholder(m.group(0)) or any(s < ce and cs < e for cs, ce in klamda):
-                        continue                     # placeholder, eller överlappar ett funnet
-                    klamda.append((s, e))
-                    ut.append(Finding(
-                        project_id=project_id, category=Category.secret, detector=self.namn,
-                        severity=sev, confidence=konf, asset_ref=f"{rel}:{radnr}",
-                        title=f"Möjlig hemlighet: {regel}", rule=regel,
-                        evidence=[Evidence.av(source=self.namn, location=f"{rel}:{radnr}",
-                                              detection_method=regel, confidence=konf,
-                                              ra_innehall=m.group(0))]))
+            plats = f"{rel}:{radnr}"
+            for t in textdetect.detektera_rad(rad):
+                ut.append(Finding(
+                    project_id=project_id, category=t.kategori, detector=self.namn,
+                    severity=t.severity, confidence=t.confidence, asset_ref=plats,
+                    title=f"Möjlig hemlighet: {t.regel}", rule=t.regel,
+                    evidence=[Evidence.av(source=self.namn, location=plats,
+                                          detection_method=t.regel, confidence=t.confidence,
+                                          ra_innehall=t.text)]))
         return ut
