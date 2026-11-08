@@ -5,6 +5,7 @@ scan frågar osv.dev (nät); parsningen är fristående och deterministiskt test
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -48,8 +49,18 @@ def findings_fran_json(data: dict, rot: Path, project_id: str) -> list[Finding]:
 class OsvAdapter:
     namn = "osv-scanner"
 
-    def __init__(self, binar: str | Path | None = None) -> None:
+    def __init__(self, binar: str | Path | None = None, *, offline: bool | None = None) -> None:
         self._binar = str(binar) if binar else self._hitta()
+        # Live-läge frågar osv.dev (nät). Offline-läge använder en lokal DB — ingen nät-
+        # fråga, deterministiskt i luftgapade miljöer. Opt-in via SERRIER_OSV_OFFLINE.
+        self._offline = offline if offline is not None \
+            else bool(os.environ.get("SERRIER_OSV_OFFLINE"))
+
+    def _scan_args(self, rot: Path) -> list[str]:
+        args = [self._binar, "scan", "source", "--format", "json", "-r"]
+        if self._offline:
+            args += ["--offline-vulnerabilities", "--no-resolve"]
+        return [*args, str(rot)]
 
     @staticmethod
     def _hitta() -> str | None:
@@ -70,8 +81,7 @@ class OsvAdapter:
         if not self.tillganglig():
             return []
         try:
-            r = subprocess.run(  # noqa: S603 — argv, ingen shell, binär vi kontrollerar
-                [self._binar, "scan", "source", "--format", "json", "-r", str(projekt_rot)],
+            r = subprocess.run(self._scan_args(projekt_rot),  # noqa: S603 — argv, ingen shell
                 capture_output=True, text=True, timeout=_TIMEOUT, check=False)
             data = json.loads(r.stdout) if r.stdout.strip() else {"results": []}
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):

@@ -6,6 +6,7 @@ semgrep läser kod som text — ingenting körs (otrodd data)."""
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,9 +25,24 @@ _KATEGORI = {"flask-debug": Category.config, "requests-verify": Category.config}
 class SemgrepAdapter:
     namn = "semgrep"
 
-    def __init__(self, regler: str | Path | None = None, binar: str | None = None) -> None:
+    def __init__(self, regler: str | Path | None = None, binar: str | None = None,
+                 registry: list[str] | None = None) -> None:
         self._regler = str(regler or _REGLER)
         self._binar = binar or self._hitta()
+        # Registret (p/python, p/security-audit, auto, …) ger bredare täckning men kräver
+        # NÄT och är icke-deterministiskt (reglerna kan ändras utan vår kontroll). Därför
+        # opt-in: default = bara våra lokala regler. Styrs av SERRIER_SEMGREP_REGISTRY.
+        if registry is None:
+            rå = os.environ.get("SERRIER_SEMGREP_REGISTRY", "")
+            registry = [r.strip() for r in rå.split(",") if r.strip()]
+        self._registry = registry
+
+    def _config_args(self) -> list[str]:
+        """--config-flaggor: alltid våra lokala regler, plus ev. opt-in registry-refs."""
+        args = ["--config", self._regler]
+        for ref in self._registry:
+            args += ["--config", ref]
+        return args
 
     @staticmethod
     def _hitta() -> str | None:
@@ -51,7 +67,7 @@ class SemgrepAdapter:
             return []
         try:
             r = subprocess.run(  # noqa: S603 — argv, ingen shell, binär vi kontrollerar
-                [self._binar, "scan", "--config", self._regler, "--json", "--quiet",
+                [self._binar, "scan", *self._config_args(), "--json", "--quiet",
                  "--disable-version-check", str(projekt_rot)],
                 capture_output=True, text=True, timeout=_TIMEOUT, check=False)
             data = json.loads(r.stdout) if r.stdout.strip() else {"results": []}

@@ -68,6 +68,21 @@ def test_posture_endpoint(tmp_path: Path) -> None:
         app.dependency_overrides.clear()
 
 
+def test_korrelationer_endpoint_och_posture_falt(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text(HEMLIG_ENV)
+    c = _klient()
+    try:
+        pid = c.post("/projects", json={"namn": "demo"}).json()["project_id"]
+        c.post(f"/projects/{pid}/scan", json={"sokvag": str(tmp_path)})
+        k = c.get(f"/projects/{pid}/correlations")
+        assert k.status_code == 200
+        assert isinstance(k.json(), list)                   # korrelationer (ev. tom)
+        body = c.get(f"/projects/{pid}/posture").json()
+        assert "antal_korrelationer" in body                # posture bär korrelations-antal
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_remediation_loop_godkann_och_auto_verifiera(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(HEMLIG_ENV)
     c = _klient()

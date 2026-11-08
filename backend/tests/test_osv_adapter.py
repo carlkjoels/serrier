@@ -46,3 +46,18 @@ def test_graceful_degradation(tmp_path: Path) -> None:
 
 def test_tom_rapport_ger_inga_findings(tmp_path: Path) -> None:
     assert findings_fran_json({"results": []}, tmp_path, "p1") == []
+
+
+def test_live_vs_offline_argv(tmp_path: Path) -> None:
+    # Default = live (nät mot osv.dev): inga offline-flaggor.
+    live = OsvAdapter(binar="/x")._scan_args(tmp_path)
+    assert "--offline-vulnerabilities" not in live
+    assert live[:4] == ["/x", "scan", "source", "--format"]
+    # Opt-in offline: lokal DB, ingen nät-fråga.
+    off = OsvAdapter(binar="/x", offline=True)._scan_args(tmp_path)
+    assert "--offline-vulnerabilities" in off
+
+
+def test_offline_lases_fran_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SERRIER_OSV_OFFLINE", "1")
+    assert "--offline-vulnerabilities" in OsvAdapter(binar="/x")._scan_args(tmp_path)

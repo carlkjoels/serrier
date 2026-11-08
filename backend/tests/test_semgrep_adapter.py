@@ -13,6 +13,25 @@ def test_uppfyller_protokollet() -> None:
     assert isinstance(SemgrepAdapter(), Scanner)
 
 
+def test_registry_ar_opt_in() -> None:
+    # Default: bara lokala regler (ingen nät-/registry-config).
+    default = SemgrepAdapter(binar="/x")._config_args()
+    assert default.count("--config") == 1
+    assert all(not v.startswith("p/") and v != "auto" for v in default)
+    # Opt-in: registry-refs läggs till som extra --config.
+    med = SemgrepAdapter(binar="/x", registry=["p/python", "auto"])._config_args()
+    assert med.count("--config") == 3
+    assert "p/python" in med
+    assert "auto" in med
+
+
+def test_registry_lases_fran_env(monkeypatch) -> None:
+    monkeypatch.setenv("SERRIER_SEMGREP_REGISTRY", "p/security-audit, p/secrets")
+    args = SemgrepAdapter(binar="/x")._config_args()
+    assert "p/security-audit" in args
+    assert "p/secrets" in args
+
+
 def test_graceful_degradation(tmp_path: Path) -> None:
     a = SemgrepAdapter(binar="/finns/inte/semgrep")
     assert a.tillganglig() is False

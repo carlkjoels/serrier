@@ -19,7 +19,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-from serrier import analyst, analytics, remediation
+from serrier import analyst, analytics, correlation, remediation
 from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
 from serrier.db.store import Store
@@ -121,8 +121,17 @@ def findings(pid: str, store: StoreDep, p: ViewerDep) -> list[dict]:
 @app.get("/projects/{pid}/posture")
 def posture(pid: str, store: StoreDep, p: ViewerDep) -> dict:
     _kravs_projekt(store, pid, p.org_id)
-    return {"posture": analytics.posture(store.lista_findings(pid)),
-            "timeline": analytics.timeline(store.lista_scans(pid))}
+    fynd = store.lista_findings(pid)
+    return {"posture": analytics.posture(fynd),
+            "timeline": analytics.timeline(store.lista_scans(pid)),
+            "antal_korrelationer": len(correlation.korrelera(fynd))}
+
+
+@app.get("/projects/{pid}/correlations")
+def correlations(pid: str, store: StoreDep, p: ViewerDep) -> list[dict]:
+    """Tillgångar som flera oberoende detektorer flaggat — prioritera dessa först."""
+    _kravs_projekt(store, pid, p.org_id)
+    return correlation.korrelera(store.lista_findings(pid))
 
 
 class StatusBegaran(BaseModel):
