@@ -1,0 +1,51 @@
+"""Store: persistens, re-scan-upsert (ingen dubblering, status bevaras), tenant-isolering.
+In-memory SQLite. All data syntetisk."""
+
+from serrier.core.findings import Category, Confidence, Finding, Severity, Status
+from serrier.db.store import Store
+
+
+def _f(project_id: str, asset: str, status: Status = Status.detected) -> Finding:
+    return Finding(project_id=project_id, category=Category.secret, detector="builtin",
+                   severity=Severity.high, confidence=Confidence.probable,
+                   asset_ref=asset, title="hemlighet", rule="r1", status=status)
+
+
+def _store() -> Store:
+    return Store("sqlite:///:memory:")
+
+
+def test_spara_och_lista() -> None:
+    st = _store()
+    pid = st.skapa_projekt("demo")
+    st.spara_scan(pid, [_f(pid, ".env:1"), _f(pid, ".env:2")], ["builtin"])
+    fynd = st.lista_findings(pid)
+    assert len(fynd) == 2
+    assert all(0 <= d["risk"] <= 100 for d in fynd)
+
+
+def test_omskanning_dubblar_inte() -> None:
+    st = _store()
+    pid = st.skapa_projekt("demo")
+    st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])
+    st.spara_scan(pid, [_f(pid, ".env:1")], ["builtin"])     # samma brist igen
+    assert len(st.lista_findings(pid)) == 1                  # upsert, inte dubblering
+
+
+def test_tenant_isolering() -> None:
+    st = _store()
+    a = st.skapa_projekt("a")
+    b = st.skapa_projekt("b")
+    st.spara_scan(a, [_f(a, ".env:1")], ["builtin"])
+    st.spara_scan(b, [_f(b, "secrets.py:9")], ["builtin"])
+    fa = st.lista_findings(a)
+    assert len(fa) == 1
+    assert fa[0]["asset_ref"] == ".env:1"                    # a ser bara sitt eget
+    assert all(d["asset_ref"] != "secrets.py:9" for d in fa)
+
+
+def test_projekt_finns() -> None:
+    st = _store()
+    pid = st.skapa_projekt("x")
+    assert st.projekt_finns(pid) is True
+    assert st.projekt_finns("okänt") is False

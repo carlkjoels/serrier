@@ -12,21 +12,14 @@ from pathlib import Path
 
 from serrier.core.findings import Finding
 from serrier.core.risk import risk_score
-from serrier.ingest.dedup import deduplicera
-from serrier.scanners.builtin import InbyggdHemlighetsskanner
-from serrier.scanners.gitleaks_adapter import GitleaksAdapter
-
-SKANNERS = [InbyggdHemlighetsskanner(), GitleaksAdapter()]
+from serrier.scanners.registry import SKANNERS, kor_skanners
 
 
 def kor(rot: Path, project_id: str = "cli") -> list[Finding]:
-    fynd: list[Finding] = []
     for s in SKANNERS:
-        if s.tillganglig():
-            fynd.extend(s.skanna(rot, project_id))
-        else:
+        if not s.tillganglig():
             print(f"  [täckningsgräns] {s.namn} ej tillgänglig — hoppas", file=sys.stderr)
-    return deduplicera(fynd)
+    return kor_skanners(rot, project_id)
 
 
 def main(argv: list[str] | None = None) -> int:
