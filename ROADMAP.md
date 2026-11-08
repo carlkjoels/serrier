@@ -76,8 +76,9 @@ is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never
   + entropy. Synthetic fixture: recall 1.00, FPR 0.00.
 - ✅ Step 3: deterministic policy engine + three failure modes (STRICT/BALANCED/PERMISSIVE).
 - ✅ Step 4: `inspect()` + `safe_text` + `POST /guard/inspect`. Local, deterministic.
-- ◻ Step 5: adversarial recall suite (base64/newline/split/homoglyph) + published numbers;
-  per-org policy override via RBAC; latency benchmark.
+- ✅ Step 5: evasion resistance (homoglyph/zero-width/whitespace/base64/CRLF) + adversarial
+  recall suite (9/9 defended → 1.00, honest undefended list) + latency (0.8ms median) +
+  per-org policy override via RBAC.
 - ◻ Step 6: **Local Proxy/CLI** enforcement adapter (guaranteed BLOCK), gated behind the
   §12 proxy artifacts. Adapter-agnostic contract so browser-ext / Claude Code / IDE attach later.
 

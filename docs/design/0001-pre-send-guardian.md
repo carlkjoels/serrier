@@ -1,10 +1,10 @@
 # Design 0001 — Pre-Send Guardian
 
-Status: **decision core built** — steps 1–4 done (shared detection core · PII/entropy ·
-policy engine with 3 failure modes + UNKNOWN · `inspect()` + `POST /guard/inspect`). Local,
-deterministic, zero integration. Remaining before step 6 (proxy): step 5 adversarial recall
-suite; per-org policy override via API/RBAC; a formal latency benchmark. Step 6 stays gated
-behind the §12 artifacts.
+Status: **decision core + hardening built** — steps 1–5 done (shared detection core ·
+PII/entropy · policy engine with 3 failure modes + UNKNOWN · `inspect()` + `POST /guard/
+inspect` · evasion resistance + adversarial recall 1.00 + 0.8ms latency · per-org policy via
+RBAC). Local, deterministic, zero integration. Next: step 6 (Local Proxy/CLI), gated behind
+the §12 proxy artifacts.
 Baseline: tag `v0.1.0` (Phases 0–10). Compare every future change against it.
 Author: founding CTO analysis, 2026-11-08.
 
