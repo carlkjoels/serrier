@@ -1,6 +1,7 @@
 # Design 0001 — Pre-Send Guardian
 
-Status: **proposed** (analysis & design; no large implementation yet)
+Status: **in progress** — decisions locked (§12); step 1 built (shared detection core);
+steps 2–4 (decision core) next; step 6 (proxy) gated behind the §12 artifacts.
 Baseline: tag `v0.1.0` (Phases 0–10). Compare every future change against it.
 Author: founding CTO analysis, 2026-11-08.
 
@@ -71,6 +72,21 @@ The third row is the whole product honesty. Serrier can *guarantee* a verdict. I
 anonymity" and "never claim secure" discipline — we extend it: **"a warning is not a
 block, and a block is only real where Serrier owns the wire."**
 
+### UNKNOWN is a first-class state (not "safe")
+
+Detection can fail: the engine errors, times out, or the input is a form it cannot parse.
+When that happens the answer is **UNKNOWN**, and UNKNOWN is its own state — it must *never*
+collapse into ALLOW / "analyzed" / "approved". A `GuardDecision` therefore carries two
+separate fields:
+
+- `analysis_status`: `ok | unknown` — did the analysis actually complete?
+- `verdict`: the action (below) — only meaningful when `analysis_status = ok`, or when the
+  failure-mode policy has explicitly decided what UNKNOWN maps to.
+
+Serrier may *never* report that traffic was security-checked when it wasn't. "Unknown" and
+"safe" are different claims, and the product's credibility depends on keeping them apart.
+What happens to UNKNOWN traffic is the failure-mode policy's job (§4.2), not a silent default.
+
 ### Enforcement strength is a property of the integration, and must be labeled
 
 | Integration | Controls egress? | Honest max enforcement | Bypass reality |
@@ -133,11 +149,35 @@ inspect(text, context) ->
   rule that produced it. Overridable per org (ties into existing RBAC: only owner edits
   policy).
 
+#### Failure-mode policy (what UNKNOWN maps to)
+
+Fail-open vs fail-closed is **not** a universal behavior — it is configurable policy with
+three modes. When `analysis_status = unknown` (detection errored / timed out / unparseable),
+the mode decides the action, and the decision is always loudly audited and labeled UNKNOWN
+(never "analyzed"):
+
+| Mode | UNKNOWN → action | Use |
+|---|---|---|
+| **STRICT** | `BLOCK` (fail-closed) | Highest assurance; block rather than risk a leak. |
+| **BALANCED** | risk-based: sensitive categories (secrets/credentials/PII) `BLOCK` or `REQUIRE_APPROVAL`; the rest per policy | Default. **May never silently pass un-analyzed sensitive content** — the policy must name exactly which risks are tolerable. |
+| **PERMISSIVE** | `ALLOW` + explicit warning + redacted audit log (fail-open) | Don't break the dev's flow; still records the gap. |
+
+Enterprise admins can centrally constrain which modes are permitted (e.g. forbid
+PERMISSIVE org-wide). The invariant holds in every mode: UNKNOWN is surfaced as UNKNOWN,
+and sensitive content is never reported as checked when it wasn't.
+
 ### 4.3 Enforcement adapters (separate, later, one at a time)
 
-Thin shims that (a) capture outbound text at a chokepoint, (b) call `inspect`, (c) apply
-the verdict with their declared `enforcement_level`. **Not in the MVP.** We pick exactly
-one first, after the decision core is proven.
+The **enforcement core is integration-agnostic**: a single `EnforcementAdapter` contract
+(capture → `inspect` → apply verdict, declaring `enforcement_level`) that *every* method
+implements. Build the contract so Local Proxy/CLI, Browser Extension, Claude Code hook and
+IDE integration can all plug into the same decision core without re-architecting.
+
+**First adapter = Local Proxy/CLI** (decision locked): Serrier owns the chokepoint, so BLOCK
+is technically verifiable (traffic is stopped before it reaches upstream), analysis stays
+local, and the architecture stays provider-agnostic. It is the clearest first proof of real
+*prevention*. The other adapters are **not** implemented now — the contract just leaves room
+for them. (See §12 for the gating artifacts required before the proxy is built.)
 
 ---
 
@@ -272,16 +312,29 @@ secure environments, air-gap) is **explicitly deferred** — see Risk R1.
 
 ---
 
-## 12. Decisions required before implementation
+## 12. Decisions — RESOLVED (2026-11-08)
 
-1. **First enforcement adapter** (after the decision core). Recommendation: a chokepoint
-   Serrier *owns* so BLOCK is real — a local proxy/CLI wrapper — before a browser
-   extension (best-effort only). *Needs your call.*
-2. **Detection scope for v1**: secrets+credentials only, or secrets+credentials+PII.
-   Recommendation: include a conservative PII layer (prevention needs it) but keep it
-   narrow to hold FPR down.
-3. **Fail-open vs fail-closed** when the Guardian errors or exceeds its latency budget.
-   Recommendation: fail-open with a loud audit event for the developer product (don't break
-   the user's workflow); fail-closed is an enterprise policy option later.
-4. **Confirm the scope gate (R1):** build steps 1–6 only; everything else stays a target
-   picture until the Guardian earns a user. *Needs your explicit yes.*
+1. **Build the decision-core MVP (steps 1–4), hold the scope gate (R1).** ✅ Locked.
+2. **Detection scope v1 = secrets + credentials + conservative PII** (email, card via Luhn,
+   national-id-shaped, internal IP), narrow to hold FPR down. ✅ Locked.
+3. **First enforcement adapter = Local Proxy/CLI**, with an integration-agnostic
+   `EnforcementAdapter` contract so Browser Extension / Claude Code hook / IDE can attach
+   later. None of those built now. ✅ Locked (§4.3).
+4. **Failure behavior = three-mode policy** (STRICT / BALANCED / PERMISSIVE), enterprise-
+   admin-constrainable, with UNKNOWN as a first-class state that never reads as "safe". ✅
+   Locked (§2, §4.2).
+
+### Gating artifacts required BEFORE step 6 (the proxy) — not before the core
+
+Build these as design + tests before any proxy enforcement ships:
+
+1. **Proxy threat model & bypass analysis** — how traffic can route around it; what the
+   guarantee does and does not cover.
+2. **Proxy failure handling** — ties to the three-mode failure policy; UNKNOWN on proxy
+   fault is never "checked".
+3. **TLS & sensitive-data handling** — how the proxy inspects without unnecessary exposure
+   (what is decrypted, where, what is never stored); MITM/TLS trust model stated honestly.
+4. **Prevention verification against a controlled upstream** — a test server that proves
+   BLOCK actually stops the bytes before upstream receives them.
+5. **Covered traffic paths** — an explicit list of exactly which flows the guarantee
+   applies to (and which it doesn't).
