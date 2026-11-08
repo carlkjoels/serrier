@@ -47,6 +47,7 @@ class Category(StrEnum):
     config = "config"
     authz = "authz"
     injection = "injection"
+    pii = "pii"        # personuppgifter (Pre-Send Guardian)
     info = "info"
 
 

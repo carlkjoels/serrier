@@ -13,6 +13,7 @@ Refaktorerad ur scanners/builtin.py (Design 0001, steg 1) — HEMLIGHETER + plac
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from serrier.core.findings import Category, Confidence, Severity
@@ -20,12 +21,15 @@ from serrier.core.findings import Category, Confidence, Severity
 
 @dataclass(frozen=True)
 class Monster:
-    """En detektionsregel: id, vad en träff betyder, och mönstret."""
+    """En detektionsregel: id, vad en träff betyder, mönstret, och en VALFRI validator.
+    Validatorn bekräftar en regex-träff semantiskt (t.ex. Luhn på kortnummer) och skär
+    falska positiva — None = varje regex-träff godtas."""
     regel: str
     kategori: Category
     severity: Severity
     confidence: Confidence
     monster: re.Pattern[str]
+    validator: Callable[[str], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +80,8 @@ def detektera_rad(rad: str, monster: list[Monster] = HEMLIGHETER) -> list[Traff]
             s, e = träff.span()
             if ar_placeholder(träff.group(0)) or any(s < ce and cs < e for cs, ce in klamda):
                 continue
+            if m.validator and not m.validator(träff.group(0)):
+                continue                     # regex matchade men validatorn underkände
             klamda.append((s, e))
             ut.append(Traff(regel=m.regel, kategori=m.kategori, severity=m.severity,
                             confidence=m.confidence, start=s, slut=e, text=träff.group(0)))
