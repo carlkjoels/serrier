@@ -8,6 +8,7 @@ försöker rymma (../, symlänk ut) avvisas — skannat innehåll är otrodd dat
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -33,3 +34,26 @@ def inom_roten(rot: Path, kandidat: Path) -> bool:
     except (ValueError, OSError):
         return False
     return True
+
+
+_HOPPA_KATALOG = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next",
+                  "dist", ".ruff_cache", ".pytest_cache", ".tools"}
+_MAX_FIL = 1_000_000   # 1 MB — resursgräns (THREAT_MODEL T8)
+
+
+def las_rader(rot: Path) -> Iterator[tuple[str, int, str]]:
+    """Generator över (rel_sökväg, radnr, rad) för textfiler under `rot`. Hoppar
+    vendor/VCS-kataloger och stora filer; path-confinad; binärt hoppas. Delas av
+    de regex-baserade skannerna (builtin, scraping). Innehållet körs aldrig."""
+    for fil in rot.rglob("*"):
+        if not fil.is_file() or any(d in fil.parts for d in _HOPPA_KATALOG):
+            continue
+        if not inom_roten(rot, fil) or fil.stat().st_size > _MAX_FIL:
+            continue
+        try:
+            rader = fil.read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue
+        rel = fil.relative_to(rot).as_posix()
+        for radnr, rad in enumerate(rader, 1):
+            yield rel, radnr, rad

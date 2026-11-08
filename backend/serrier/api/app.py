@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from serrier import analyst, analytics, remediation
 from serrier.core.findings import Status
 from serrier.db.store import Store
+from serrier.scanners import natverk
 from serrier.scanners.registry import kor_skanners, tillgangliga
 
 
@@ -82,6 +83,13 @@ def _kravs_fynd(store: Store, pid: str, fid: str) -> dict:
     if not f:
         raise HTTPException(status_code=404, detail="okänt fynd")
     return f
+
+
+@app.get("/natverk/posture")
+def natverk_posture() -> dict:
+    """Modul C — nätverks-/VPN-posture för DENNA maskin (ingen fjärr-prob)."""
+    ss, interfaces, resolv = natverk.samla()
+    return natverk.posture(ss, interfaces, resolv)
 
 
 @app.post("/projects/{pid}/findings/{fid}/atgardsforslag")

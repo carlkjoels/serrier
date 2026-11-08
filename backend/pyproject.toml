@@ -21,8 +21,9 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S", "PL", "RUF", "ANN", "PT"]
-# RUF001-003: typografiska tecken (… → × –) i svenska kommentarer är avsiktliga.
-ignore = ["ANN401", "RUF001", "RUF002", "RUF003"]
+# RUF001-003: typografiska tecken i kommentarer; PLC2401/2403: svenska identifierare —
+# allt avsiktligt (projektets språk är svenska).
+ignore = ["ANN401", "RUF001", "RUF002", "RUF003", "PLC2401", "PLC2403"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "ANN", "PLR2004"]
