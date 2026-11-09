@@ -78,7 +78,10 @@ behind "ready to distribute to real users."
    stable token, writes a sourced `env` file that points AI tools at it, records events to the
    control plane (#1). **+ Host-allowlist loopback hardening (§4).** ← build next.
 2. **Tray client** — thin, optional, over local HTTP; autostart; non-blocking.
-3. **Tauri packaging + signing** — only when distributing.
+3. **Tauri packaging + signing** — only when distributing. **Scaffolded** in `desktop/` +
+   `.github/workflows/desktop-release.yml` (Tauri v2 + PyInstaller sidecar + signing CI).
+   NOT built/signed/verified in the headless dev env — builds on a machine/CI with the
+   toolchain, a display, and certificates. See [`desktop/README.md`](../../desktop/README.md).
 
 ## 7. Definition of Done — step 1 (daemon)
 

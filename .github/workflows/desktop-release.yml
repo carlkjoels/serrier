@@ -1,0 +1,72 @@
+# Bygger + (om certifikat finns) signerar Serrier desktop för macOS/Windows/Linux.
+# Scaffold — körs på riktiga runners med toolchain + signerings-secrets (se desktop/README).
+# Utan secrets byggs OSIGNERADE artefakter (endast dev/test — distribuera aldrig osignerat).
+name: desktop-release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, triple: "" }
+          - { os: ubuntu-latest, triple: "" }
+          - { os: windows-latest, triple: "" }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux deps (webkit + appindicator)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build backend sidecar (PyInstaller)
+        shell: bash
+        run: |
+          cd backend
+          uv sync --extra postgres
+          uv run pyinstaller ../desktop/sidecar/serrier-backend.spec \
+            --distpath ../desktop/src-tauri/binaries
+          TRIPLE=$(rustc -Vv | sed -n 's/host: //p')
+          BIN=../desktop/src-tauri/binaries/serrier-backend
+          [ -f "$BIN.exe" ] && mv "$BIN.exe" "$BIN-$TRIPLE.exe" || mv "$BIN" "$BIN-$TRIPLE"
+
+      - name: Export frontend (static)
+        shell: bash
+        run: cd frontend && npm ci && TAURI=1 NEXT_PUBLIC_API=http://127.0.0.1:8788 npm run build
+
+      - name: Build + sign desktop app
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: desktop
+        env:
+          # macOS signing + notarization (tomt → osignerat bygge)
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Windows signing
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          # Tauri updater-signering (valfri)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: serrier-desktop-${{ matrix.os }}
+          path: desktop/src-tauri/target/release/bundle/**
