@@ -5,9 +5,15 @@ discipline it must obey. **Nothing here beyond Generation 1 is built, and Genera
 explicitly gated** (see §6). This doc exists so that when later generations *are* built, they
 are built against the honesty rules — constitution before the pressure.
 
-> **Serrier — The Security Runtime for AI.** An intelligent layer that continuously observes,
-> understands and governs AI-related activity — from information access to external calls and
-> agent actions. **Prevent. Understand. Govern. Verify.**
+> **Serrier — a Developer-native AI Security Runtime.** An intelligent layer that continuously
+> observes, understands and governs AI-related activity — from information access to external
+> calls and agent actions. **Prevent. Understand. Govern. Verify.**
+
+**Positioning note (precision over hype):** the accurate phrase is **"Developer-native AI
+Security Runtime"**, not "EDR for AI". Serrier today has visibility into traffic that passes
+through its *controlled integration paths* — not full endpoint visibility. "Developer-native"
+is both more precise and more credible, and it names the actual wedge (the developer's AI
+workflow) rather than borrowing an incumbent category's trust.
 
 ## 1. The idea, stated honestly
 
@@ -23,9 +29,10 @@ telemetry Serrier **does not have** — it requires separate integrations (Claud
 MCP interception, OS-near sensors). We will not claim visibility we have not built. The
 six-engine diagram is a *target*, not a description of current capability.
 
-## 2. The four-state discipline — LOCKED (the most important rule)
+## 2. The four-state discipline — a CENTRAL ARCHITECTURE CONTRACT (locked)
 
-Serrier must never conflate these four, in code, UI, or reporting:
+This is not a guideline; it is a **contract** every engine, correlation step, UI surface and
+report must honor. Serrier must never conflate these four, in code, UI, or reporting:
 
 | State | Meaning | Evidence required |
 |---|---|---|

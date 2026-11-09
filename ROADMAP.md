@@ -91,8 +91,14 @@ is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never
   **Transparent TLS MITM rejected.** **Streaming (SSE) supported** — relayed without
   buffering, request-side prevention preserved; verified with the real Anthropic SDK.
 
+## Next milestone — proof, not code
+Gen 1 (Prevention Runtime) is built and verified. The next milestone is **external security
+review + real-workflow usage**, not more product code. Reviewer brief (attack targets, repro,
+expected behavior, severity, pass/fail, "break the tests, don't confirm them"):
+[`docs/security/red-team-brief.md`](docs/security/red-team-brief.md).
+
 ## Target picture (NOT a backlog — a direction)
-Long-term framing: **Serrier as an AI Security Runtime** —
+Long-term framing: **a Developer-native AI Security Runtime** —
 [`docs/design/0003-security-runtime-vision.md`](docs/design/0003-security-runtime-vision.md).
 Four generations: (1) Prevention Runtime **[built]** → (2) Contextual Intelligence → (3)
 Behavioral Security → (4) Adaptive Security. **Gen 2–4 are gated**: do not build them until
