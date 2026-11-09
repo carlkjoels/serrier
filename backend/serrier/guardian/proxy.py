@@ -119,10 +119,12 @@ class GuardProxy:
 
     def _auktoriserad(self, request: Request) -> bool:
         """Loopback-auth: andra lokala processer får inte använda proxyn. Token saknas i
-        konfig → öppet (dev). Jämförelse i konstant tid."""
+        konfig → öppet (dev). Token tas från path (/t/<token>/…, injiceras via barnets
+        base_url — syns ej i process-listor) eller X-Serrier-Token. Jämförelse konstant tid."""
         if self.token is None:
             return True
-        return hmac.compare_digest(request.headers.get(_TOKEN_HEADER, ""), self.token)
+        given = request.path_params.get("token") or request.headers.get(_TOKEN_HEADER, "")
+        return hmac.compare_digest(given, self.token)
 
     def _policy_och_mode(self) -> tuple[Policy, FailureMode]:
         """Per-org-policy om en store+org kopplats, annars proxyns default."""
@@ -222,7 +224,10 @@ class GuardProxy:
 
     def app(self) -> Starlette:
         metoder = ["GET", "POST", "PUT", "DELETE", "PATCH"]
+        # Path-token-rutter FÖRST (för CLI-injektion via base_url); sedan header-token-rutter.
         return Starlette(routes=[
+            Route("/t/{token}/{nyckel}", self._hantera, methods=metoder),
+            Route("/t/{token}/{nyckel}/{rest:path}", self._hantera, methods=metoder),
             Route("/{nyckel}", self._hantera, methods=metoder),
             Route("/{nyckel}/{rest:path}", self._hantera, methods=metoder),
         ])
