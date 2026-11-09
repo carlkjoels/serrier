@@ -92,10 +92,12 @@ is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never
   buffering, request-side prevention preserved; verified with the real Anthropic SDK.
 
 ## Target picture (NOT a backlog — a direction)
-The strategic vision (Secure AI Adoption Infrastructure: policy/model gateway, agent
-governance, enterprise control plane, Serrier Secure Environments / air-gap) is a *target*,
-deliberately gated behind the Guardian earning a real user. Scope explosion is the primary
-product risk (design doc R1). Nothing here is built until the prevention MVP is validated.
+Long-term framing: **Serrier as an AI Security Runtime** —
+[`docs/design/0003-security-runtime-vision.md`](docs/design/0003-security-runtime-vision.md).
+Four generations: (1) Prevention Runtime **[built]** → (2) Contextual Intelligence → (3)
+Behavioral Security → (4) Adaptive Security. **Gen 2–4 are gated**: do not build them until
+Gen 1 is proven in real workflows and survives external security review. The locked discipline:
+observation ≠ correlation ≠ risk ≠ incident. Scope explosion is the primary product risk.
 
 ## Deferred on purpose (not forgotten)
 - Cross-detector *finding* correlation beyond same-asset (semantic dedup across rules).
