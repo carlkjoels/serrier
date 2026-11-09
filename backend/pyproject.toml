@@ -20,6 +20,8 @@ postgres = ["psycopg[binary]>=3.2"]
 [project.scripts]
 # CLI-wrapper (model C): `serrier-guard run -- <kommando>`
 serrier-guard = "serrier.guardian.run:main"
+# Lokal skanning utan server: `serrier-scan <sökväg>`
+serrier-scan = "serrier.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.7"]

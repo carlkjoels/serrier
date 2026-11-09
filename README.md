@@ -43,19 +43,21 @@ export. Backend: 86 tests, ruff-clean. The product never claims "secure".
 
 ## Run it
 
-**Locally (dev, SQLite, auth off):**
+**One command (dev, SQLite, auth off):**
 
 ```bash
-# backend — http://localhost:8000
-cd backend && uv run uvicorn serrier.api.app:app --reload
-
-# frontend — http://localhost:3000
-cd frontend && npm install && npm run dev
+make dev
 ```
 
-With no API keys configured the backend runs in dev mode (owner access, no auth) so the
-flow is friction-free. Set `SERRIER_API_KEYS=key1,key2` (or bootstrap via `POST /orgs`)
-to turn auth on; then pass the key as `Authorization: Bearer <key>` or `X-API-Key`.
+Starts backend + frontend, waits for them, prints the links, and Ctrl-C stops both:
+- Dashboard (scanner): http://localhost:3000
+- Pre-Send Guardian (live prevention): http://localhost:3000/guard
+- API docs: http://localhost:8000/docs
+
+Other make targets: `make test` · `make lint` · `make scan REPO=/path` (scan a repo locally,
+no server) · `make guard CMD="claude"` (run an AI tool through the Guardian). `make help` lists
+them. With no API keys the backend runs in dev mode (owner, no auth); set
+`SERRIER_API_KEYS=key1,key2` to turn auth on (Bearer / `X-API-Key`).
 
 **Full stack (Postgres + migrations + dashboard):**
 
