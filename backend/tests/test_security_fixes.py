@@ -2,11 +2,14 @@
 Granskaren ska försöka ta sig RUNT dessa — testerna pinnar bara att fixarna gör vad de ska.
 Syntetisk data."""
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from upstream_harness import KontrolleradUpstream
 
 from serrier.api.app import app, get_store, krav_sakra_konfig
 from serrier.db.store import Store
+from serrier.guardian.proxy import GuardProxy, Upstream
 
 
 def _klient(store: Store) -> TestClient:
@@ -65,3 +68,20 @@ def test_f2_scan_utanfor_workspace_avvisas(monkeypatch, tmp_path) -> None:
                       json={"sokvag": str(ws / "lank")}).status_code == 403
     finally:
         app.dependency_overrides.clear()
+
+
+# --- F3: strömmande body-gräns --------------------------------------------
+def test_f3_stor_chunked_body_avvisas_utan_att_buffras() -> None:
+    up = KontrolleradUpstream()
+    klient = httpx.AsyncClient(transport=httpx.ASGITransport(app=up.app()))
+    px = GuardProxy(klient=klient, allowlist=[Upstream("test", "https://u.test")],
+                    validera_ip=False, max_body=1000)
+    c = TestClient(px.app())
+
+    def stor_chunked():                                   # ingen Content-Length
+        for _ in range(50):
+            yield b"x" * 100                              # 5000 B > gräns 1000
+
+    r = c.post("/test/v1/x", content=stor_chunked())
+    assert r.status_code == 413
+    assert up.antal_bytes == 0                            # aldrig inspekterad/forwardad

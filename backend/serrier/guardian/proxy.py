@@ -93,6 +93,19 @@ def _sanera_json(body: bytes, decision: GuardDecision) -> bytes | None:
     return decision.safe_text.encode("utf-8")
 
 
+async def _las_begransad(request: Request, grans: int) -> bytes | None:
+    """Läs request-body STRÖMMANDE och avbryt så fort `grans` överskrids — så en mycket stor
+    chunked body (utan Content-Length) aldrig buffras i sin helhet (F3). None = översteg gränsen."""
+    delar: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > grans:
+            return None                       # avbryt; buffra aldrig resten
+        delar.append(chunk)
+    return b"".join(delar)
+
+
 @dataclass
 class GuardProxy:
     """Explicit loopback-proxy. `klient` = httpx.AsyncClient (prod: verify=True,
@@ -159,12 +172,13 @@ class GuardProxy:
             return JSONResponse(status_code=404,
                                 content={"serrier": "okänd upstream", "nyckel": nyckel})
 
-        # Resursgräns: avvisa för stora bodies FÖRE vi läser/inspekterar (DoS-skydd).
+        # Resursgräns (F3): Content-Length-snabbspår + STRÖMMANDE läsning som avbryter direkt
+        # vid gränsen — en stor chunked body (utan Content-Length) buffras aldrig i sin helhet.
         cl = request.headers.get("content-length", "")
         if cl.isdigit() and int(cl) > self.max_body:
             return JSONResponse(status_code=413, content={"serrier": "body för stor"})
-        body = await request.body()
-        if len(body) > self.max_body:
+        body = await _las_begransad(request, self.max_body)
+        if body is None:
             return JSONResponse(status_code=413, content={"serrier": "body för stor"})
         text = body.decode("utf-8", "replace")
         policy, mode = self._policy_och_mode()
