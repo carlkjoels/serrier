@@ -1,10 +1,30 @@
 # Design 0002 — Guardian enforcement adapter: Local Proxy/CLI
 
-Status: **built** — the proxy (model A) is implemented and verified against a controlled
-upstream: leak-through = 0 for blocked cases, byte-identical passthrough for clean traffic,
-safe JSON redact-or-block, SSRF/DNS-rebinding/allowlist/UNKNOWN defenses tested. 25 Guardian
-tests incl. a leak-through battery. CLI wrapper (model C) still to come. Decisions resolved
-(§9). Builds on [0001](0001-pre-send-guardian.md) (decision core, steps 1–5). Baseline `v0.1.0`.
+Status: **built + hardened** — the proxy (model A) is implemented, hardened, and verified
+against a controlled upstream over **real TCP** (uvicorn, not ASGI injection): leak-through
+= 0 for blocked cases, byte-identical passthrough, safe JSON redact-or-block, SSRF/DNS-
+rebinding/allowlist/UNKNOWN defenses tested. CLI wrapper (model C) still to come. Decisions
+resolved (§9). Builds on [0001](0001-pre-send-guardian.md). Baseline `v0.1.0`.
+
+### Hardening applied (post-build, 2026-11-09)
+- **DNS-TOCTOU fixed:** `validerad_ip()` resolves once, requires all-global, and **pins the
+  IP**; the forward connects to the pinned IP with `sni_hostname`/Host = hostname — no second
+  resolution can rebind to an internal address between check and connect.
+- **Loopback auth:** `X-Serrier-Token` (constant-time); missing/wrong → 401, nothing
+  forwarded. Prevents other local processes from using the proxy.
+- **Policy coupling:** the proxy can take a `Store` + `org_id` and enforce that org's policy
+  + failure mode per request.
+- **Resource limit:** body over `max_body` (10 MB) → 413 before inspection. `trust_env=False`
+  so an ambient `HTTPS_PROXY` can't hijack the forward.
+- **Verified over real TCP:** block stops bytes on the wire, clean is byte-identical, plus
+  ~1 MB body, chunked transfer, unexpected headers, redirect-never-followed, env-proxy ignored.
+
+### Honest caveats (unchanged truths)
+- Real-TCP byte-identity is proven for the tested cases/conditions — not for every payload
+  shape or network condition. Leak-through = 0 is verified for the **blocked test cases**,
+  not for every conceivable secret or channel.
+- Residual: recall < 100% (hex/encrypted/split evade); response-side not inspected; REDACT
+  only for JSON. Next external review should attempt bypass and audit the threat model.
 
 0001 built the decision core: `inspect(text) → GuardDecision` (local, deterministic, evasion-
 hardened). This document is what must exist **before** we build the first *enforcement*
