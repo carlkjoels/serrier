@@ -47,6 +47,21 @@ class ApiKey(Base):
     skapad: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class GuardEvent(Base):
+    """Ett REDAKTERAT Guardian-beslut (prevention-event), org-scopat. Lagrar ALDRIG rå text
+    eller safe_text — bara verdikt + redakterade findings (first4…last4). Dashboarden läser
+    detta som ett live-flöde: kör man `serrier-guard run -- claude` fylls det på i realtid."""
+    __tablename__ = "guard_event"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("org.id"), index=True)
+    tid: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    action: Mapped[str] = mapped_column(String)
+    analysis_status: Mapped[str] = mapped_column(String)
+    failure_mode: Mapped[str] = mapped_column(String, default="")
+    upstream: Mapped[str] = mapped_column(String, default="")
+    rules_json: Mapped[str] = mapped_column(Text)        # [{regel, redacted}] — redakterat
+
+
 class GuardPolicy(Base):
     """Pre-Send Guardian-policy per org: sensitivitet→aktion-tabell (JSON) + fel-läge.
     En rad per org; saknas den → STANDARD-policy + balanced."""

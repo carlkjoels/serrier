@@ -200,7 +200,39 @@ def guard_inspect_endpoint(b: GuardBegaran, store: StoreDep, p: ViewerDep) -> di
             mode = FailureMode(b.failure_mode)
         except ValueError as e:
             raise HTTPException(status_code=400, detail="ogiltigt failure_mode") from e
-    return guard_inspect(b.text, failure_mode=mode, policy=policy).som_dict()
+    d = guard_inspect(b.text, failure_mode=mode, policy=policy)
+    # Skriv ett REDAKTERAT event till kontrollplanet → dashboardens live-flöde (#1).
+    store.spara_guard_event(
+        p.org_id, action=d.action.value, analysis_status=d.analysis_status.value,
+        failure_mode=d.failure_mode.value if d.failure_mode else "",
+        rules=[{"regel": f.regel, "redacted": f.redacted} for f in d.findings])
+    return d.som_dict()
+
+
+class GuardEventBegaran(BaseModel):
+    action: str
+    analysis_status: str = "ok"
+    failure_mode: str | None = None
+    upstream: str | None = None
+    rules: list[dict] = []                   # [{regel, redacted}] — redakterat, aldrig rå
+
+
+@app.post("/guard/events")
+def guard_event_ingest(b: GuardEventBegaran, store: StoreDep, p: MemberDep) -> dict:
+    """Ta emot ett REDAKTERAT prevention-event (från en proxy/CLI) — org-scopat. Endast
+    verdikt + redakterade findings; rå text får aldrig skickas hit."""
+    store.spara_guard_event(
+        p.org_id, action=b.action, analysis_status=b.analysis_status,
+        failure_mode=b.failure_mode or "", upstream=b.upstream or "",
+        rules=[{"regel": str(r.get("regel", "")), "redacted": str(r.get("redacted", ""))}
+               for r in b.rules])
+    return {"ok": True}
+
+
+@app.get("/guard/events")
+def guard_events(store: StoreDep, p: ViewerDep, limit: int = 100) -> list[dict]:
+    """Live-flöde: senaste prevention-besluten för orgen (nyast först). Allt redakterat."""
+    return store.lista_guard_events(p.org_id, limit=limit)
 
 
 class GuardPolicyBegaran(BaseModel):

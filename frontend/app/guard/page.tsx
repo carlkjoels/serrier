@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API ?? "http://localhost:8000";
 
@@ -15,7 +15,14 @@ type Decision = {
   reasons: Reason[];
   findings: Finding[];
 };
-type Historik = { text: string; action: string; status: string; tid: string };
+type GuardEvent = {
+  action: string;
+  analysis_status: string;
+  failure_mode: string | null;
+  upstream: string | null;
+  rules: { regel: string; redacted: string }[];
+  tid: string;
+};
 
 const ACTION_FARG: Record<string, string> = {
   block: "bg-red-600",
@@ -31,25 +38,43 @@ export default function Guardian() {
   const [nyckel, setNyckel] = useState("");
   const [mode, setMode] = useState("balanced");
   const [d, setD] = useState<Decision | null>(null);
-  const [hist, setHist] = useState<Historik[]>([]);
+  const [events, setEvents] = useState<GuardEvent[]>([]);
   const [fel, setFel] = useState("");
 
-  const tally = ORDNING.map((a) => ({ a, n: hist.filter((h) => h.action === a).length }));
+  const hdrs = useCallback(
+    (): HeadersInit => (nyckel ? { "X-API-Key": nyckel } : {}),
+    [nyckel],
+  );
+
+  // Live-flöde: pollar kontrollplanet. Fylls på av /guard/inspect OCH av `serrier-guard run`.
+  const hamtaEvents = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/guard/events?limit=50`, { headers: hdrs() });
+      if (r.ok) setEvents(await r.json());
+    } catch {
+      /* tyst — pollning */
+    }
+  }, [hdrs]);
+
+  useEffect(() => {
+    hamtaEvents();
+    const t = setInterval(hamtaEvents, 3000);
+    return () => clearInterval(t);
+  }, [hamtaEvents]);
+
+  const tally = ORDNING.map((a) => ({ a, n: events.filter((e) => e.action === a).length }));
 
   async function inspektera() {
     setFel("");
     try {
       const r = await fetch(`${API}/guard/inspect`, {
         method: "POST",
-        headers: { "content-type": "application/json", ...(nyckel ? { "X-API-Key": nyckel } : {}) },
+        headers: { "content-type": "application/json", ...hdrs() },
         body: JSON.stringify({ text, failure_mode: mode }),
       });
       if (!r.ok) throw new Error(String(r.status));
-      const dec: Decision = await r.json();
-      setD(dec);
-      setHist((h) =>
-        [{ text, action: dec.action, status: dec.analysis_status, tid: new Date().toLocaleTimeString() }, ...h].slice(0, 20),
-      );
+      setD(await r.json());
+      hamtaEvents(); // beslutet skrevs som event på servern — uppdatera flödet
     } catch {
       setD(null);
       setFel(`Kunde inte inspektera. Kör backend på ${API}.`);
@@ -62,7 +87,7 @@ export default function Guardian() {
         <div>
           <h1 className="text-2xl font-bold">Serrier — Pre-Send Guardian</h1>
           <p className="text-sm text-neutral-500">
-            Inspektera utgående AI-text lokalt. Prevention före vidarebefordran.
+            Live-monitor över prevention-beslut. Rå text lämnar aldrig maskinen.
           </p>
         </div>
         <Link href="/" className="text-sm underline">
@@ -81,10 +106,10 @@ export default function Guardian() {
 
       <section className="mb-6">
         <textarea
-          className="h-28 w-full border-2 border-neutral-900 p-3 font-mono text-sm"
+          className="h-24 w-full border-2 border-neutral-900 p-3 font-mono text-sm"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Klistra in text som är på väg till en AI-tjänst…"
+          placeholder="Testa: klistra in text som är på väg till en AI-tjänst…"
         />
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <select
@@ -149,9 +174,17 @@ export default function Guardian() {
         </section>
       )}
 
-      {hist.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase text-neutral-500">Senaste beslut</h2>
+      <section>
+        <h2 className="mb-2 text-sm font-semibold uppercase text-neutral-500">
+          Live-flöde ({events.length}) — uppdateras var 3:e sekund
+        </h2>
+        {events.length === 0 ? (
+          <p className="text-sm text-neutral-500">
+            Inga beslut än. Testa ovan, eller kör{" "}
+            <code className="font-mono">serrier-guard run -- &lt;ditt-ai-verktyg&gt;</code> — besluten
+            dyker upp här i realtid.
+          </p>
+        ) : (
           <div className="overflow-hidden border-2 border-neutral-900">
             <table className="w-full text-sm">
               <thead className="bg-neutral-900 text-left text-white">
@@ -159,35 +192,41 @@ export default function Guardian() {
                   <th className="p-2">Tid</th>
                   <th className="p-2">Aktion</th>
                   <th className="p-2">Status</th>
-                  <th className="p-2">Text (början)</th>
+                  <th className="p-2">Upstream</th>
+                  <th className="p-2">Fynd (redakterat)</th>
                 </tr>
               </thead>
               <tbody>
-                {hist.map((h, i) => (
+                {events.map((e, i) => (
                   <tr key={i} className="border-t border-neutral-200">
-                    <td className="p-2 text-neutral-500">{h.tid}</td>
+                    <td className="p-2 text-neutral-500">
+                      {new Date(e.tid).toLocaleTimeString()}
+                    </td>
                     <td className="p-2">
                       <span
                         className={`inline-block px-2 py-0.5 text-xs text-white ${
-                          ACTION_FARG[h.action] ?? "bg-neutral-400"
+                          ACTION_FARG[e.action] ?? "bg-neutral-400"
                         }`}
                       >
-                        {h.action}
+                        {e.action}
                       </span>
                     </td>
-                    <td className="p-2 text-neutral-600">{h.status}</td>
-                    <td className="p-2 font-mono text-xs">{h.text.slice(0, 48)}</td>
+                    <td className="p-2 text-neutral-600">{e.analysis_status}</td>
+                    <td className="p-2 font-mono text-xs text-neutral-600">{e.upstream ?? "—"}</td>
+                    <td className="p-2 font-mono text-xs">
+                      {e.rules.map((r) => r.regel).join(", ") || "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </section>
-      )}
+        )}
+      </section>
 
       <p className="mt-6 text-xs text-neutral-500">
-        Detektionen körs lokalt och deterministiskt — rå text lämnar aldrig maskinen. Täcker
-        body/text; headers innehålls-inspekteras inte. Recall &lt; 100 %.
+        Flödet bär bara redakterad data (verdikt + first4…last4). Täcker body/text; headers
+        innehålls-inspekteras inte. Recall &lt; 100 %.
       </p>
     </main>
   );

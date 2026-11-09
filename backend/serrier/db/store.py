@@ -22,6 +22,7 @@ from serrier.db.models import (
     AuditEvent,
     Base,
     FindingRow,
+    GuardEvent,
     GuardPolicy,
     Org,
     Project,
@@ -146,6 +147,26 @@ class Store:
                                   failure_mode=failure_mode.value))
             self._audit(s, org_id, "guard_policy", f"fel-läge {failure_mode.value}")
             s.commit()
+
+    def spara_guard_event(self, org_id: str, *, action: str, analysis_status: str,  # noqa: PLR0913
+                          failure_mode: str = "", upstream: str = "",
+                          rules: list[dict] | None = None) -> None:
+        """Spara ett REDAKTERAT prevention-event. `rules` = [{regel, redacted}] — aldrig rå."""
+        with self._Session() as s:
+            s.add(GuardEvent(org_id=org_id, action=action, analysis_status=analysis_status,
+                             failure_mode=failure_mode or "", upstream=upstream or "",
+                             rules_json=json.dumps(rules or [])))
+            s.commit()
+
+    def lista_guard_events(self, org_id: str, limit: int = 100) -> list[dict]:
+        """Senaste prevention-events för en org (nyast först). Allt redakterat."""
+        with self._Session() as s:
+            rader = s.scalars(
+                select(GuardEvent).where(GuardEvent.org_id == org_id)
+                .order_by(GuardEvent.tid.desc(), GuardEvent.id.desc()).limit(limit)).all()
+            return [{"action": r.action, "analysis_status": r.analysis_status,
+                     "failure_mode": r.failure_mode or None, "upstream": r.upstream or None,
+                     "rules": json.loads(r.rules_json), "tid": r.tid.isoformat()} for r in rader]
 
     def hamta_guard_policy(self, org_id: str) -> tuple[Policy, FailureMode]:
         """Orgens policy, eller STANDARD + balanced om ingen satts."""

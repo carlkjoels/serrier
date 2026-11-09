@@ -32,6 +32,7 @@ from collections.abc import Callable
 
 import uvicorn
 
+from serrier.db.store import Store
 from serrier.guardian.policy import FailureMode
 from serrier.guardian.proxy import DEFAULT_ALLOWLIST, GuardProxy, Upstream, skapa_klient
 
@@ -91,16 +92,17 @@ def barn_env(bas_env: dict, port: int, token: str, allowlist: list[Upstream]) ->
 
 def kor(cmd: list[str], *, failure_mode: FailureMode = FailureMode.balanced,  # noqa: PLR0913
         allowlist: list[Upstream] | None = None, validera_ip: bool = True,
-        timeout: float | None = None,
+        timeout: float | None = None, store: object = None, org_id: str | None = None,
         klient_fabrik: Callable[[], object] = skapa_klient,
         server_fabrik: Callable[..., object] = _ProxyServer) -> int:
     """Starta proxyn, kör `cmd` med routad miljö, städa upp. Returnerar barnets exit-kod
-    (eller 1 vid fail-closed proxy-start, 124 vid timeout)."""
+    (eller 1 vid fail-closed proxy-start, 124 vid timeout). store+org_id → proxyn rapporterar
+    REDAKTERADE prevention-events till kontrollplanet (dashboardens live-flöde, #1)."""
     allowlist = allowlist or list(DEFAULT_ALLOWLIST)
     token = secrets.token_urlsafe(24)
     port = _ledig_port()
     proxy = GuardProxy(klient=klient_fabrik(), allowlist=allowlist, failure_mode=failure_mode,
-                       token=token, validera_ip=validera_ip)
+                       token=token, validera_ip=validera_ip, store=store, org_id=org_id)
     server = server_fabrik(proxy, port)
 
     if not server.starta():
@@ -140,7 +142,15 @@ def main(argv: list[str] | None = None) -> int:
         print("serrier: inget kommando angivet efter --", file=sys.stderr)
         return 2
     mode = FailureMode(os.environ.get("SERRIER_PROXY_FAILURE_MODE", "balanced"))
-    return kor(cmd, failure_mode=mode)
+    # Dela DB med backend → prevention-events hamnar i dashboardens live-flöde (#1).
+    # Fel här får aldrig hindra att skyddet startar.
+    store = org_id = None
+    try:
+        store = Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+        org_id = store.dev_org()
+    except Exception as e:
+        print(f"serrier: (events av — {type(e).__name__})", file=sys.stderr)
+    return kor(cmd, failure_mode=mode, store=store, org_id=org_id)
 
 
 if __name__ == "__main__":

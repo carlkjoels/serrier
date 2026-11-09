@@ -141,6 +141,18 @@ class GuardProxy:
             "findings": [{"regel": f.regel, "redacted": f.redacted} for f in d.findings],
             "bytes_vidarebefordrade": bytes_fram,
         })
+        # Rapportera REDAKTERAT till kontrollplanet (#1) → dashboardens live-flöde. Ett fel
+        # här får ALDRIG krascha proxyn eller blockera trafiken.
+        if self.store is not None and self.org_id is not None:
+            try:
+                self.store.spara_guard_event(
+                    self.org_id, action=d.action.value,
+                    analysis_status=d.analysis_status.value,
+                    failure_mode=d.failure_mode.value if d.failure_mode else "",
+                    upstream=upstream,
+                    rules=[{"regel": f.regel, "redacted": f.redacted} for f in d.findings])
+            except Exception:  # noqa: S110 — telemetri får aldrig störa enforcement
+                pass
 
     def _block_svar(self, d: GuardDecision, detalj: str) -> JSONResponse:
         return JSONResponse(status_code=403, content={
