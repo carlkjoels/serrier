@@ -17,8 +17,11 @@ import json
 import os
 import secrets
 import socket
+import stat
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import unquote, urlsplit, urlunsplit
 
@@ -37,6 +40,7 @@ if TYPE_CHECKING:
     from serrier.db.store import Store
 
 _TOKEN_HEADER = "x-serrier-token"  # noqa: S105 — header-namn, inte en hemlighet
+_AUDIT_MAX = 1000                  # ringbuffert-tak för in-memory-audit (F7)
 
 
 @dataclass(frozen=True)
@@ -119,7 +123,8 @@ class GuardProxy:
     store: Store | None = None                 # satt → policy hämtas per org
     org_id: str | None = None
     max_body: int = 10_000_000                 # 10 MB — resursgräns (avvisa innan inspektion)
-    audit: list[dict] = field(default_factory=list)
+    # Bunden retention (F7): ringbuffert, växer inte obegränsat per request.
+    audit: deque = field(default_factory=lambda: deque(maxlen=_AUDIT_MAX))
 
     namn: str = "local-proxy"
     enforcement_level: EnforcementLevel = EnforcementLevel.guaranteed
@@ -289,16 +294,28 @@ def skapa_klient() -> httpx.AsyncClient:
     return httpx.AsyncClient(verify=True, follow_redirects=False, timeout=30.0, trust_env=False)
 
 
+def skriv_token(token: str, sokvag: Path | None = None) -> Path:
+    """Skriv proxy-token till en fil med 0600-behörighet (F7) — ALDRIG till stdout/logg.
+    Returnerar sökvägen. Default: ~/.serrier/proxy-token."""
+    fil = sokvag or (Path.home() / ".serrier" / "proxy-token")
+    fil.parent.mkdir(parents=True, exist_ok=True)
+    fil.touch(mode=stat.S_IRUSR | stat.S_IWUSR, exist_ok=True)   # 0600
+    fil.chmod(stat.S_IRUSR | stat.S_IWUSR)                       # säkerställ om den fanns
+    fil.write_text(token)
+    return fil
+
+
 def main() -> None:
     """Kör proxyn skarpt på LOOPBACK (127.0.0.1, aldrig 0.0.0.0) med default-allowlisten och
-    en PÅTVINGAD token (loopback-auth) som skrivs ut en gång. Klienten måste skicka den som
-    X-Serrier-Token. Klient: base_url = http://127.0.0.1:<port>/<anthropic|openai|gemini>.
+    en PÅTVINGAD token (loopback-auth). Token skrivs till en 0600-fil, ALDRIG till stdout.
+    Klient: base_url = http://127.0.0.1:<port>/t/<token>/<anthropic|openai|gemini>.
     Env: SERRIER_PROXY_PORT (8787), SERRIER_PROXY_FAILURE_MODE (balanced), SERRIER_PROXY_TOKEN."""
     port = int(os.environ.get("SERRIER_PROXY_PORT", "8787"))
     mode = FailureMode(os.environ.get("SERRIER_PROXY_FAILURE_MODE", "balanced"))
     token = os.environ.get("SERRIER_PROXY_TOKEN") or secrets.token_urlsafe(24)
+    fil = skriv_token(token)
     proxy = GuardProxy(klient=skapa_klient(), failure_mode=mode, token=token)
-    print(f"serrier proxy: loopback 127.0.0.1:{port} — X-Serrier-Token: {token}")
+    print(f"serrier proxy: loopback 127.0.0.1:{port} — token skriven till {fil} (0600)")
     uvicorn.run(proxy.app(), host="127.0.0.1", port=port)   # loopback-only, låst beslut
 
 

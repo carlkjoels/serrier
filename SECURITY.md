@@ -42,7 +42,20 @@ re-checked by authz on every query. Cross-tenant access is a tested-against fail
 Evidence is kept only as long as useful; sensitive evidence supports verifiable deletion
 (crypto-shred). Users can request erasure of a project's data.
 
-## Reporting a vulnerability
+## Reporting a vulnerability (coordinated disclosure)
 
-Pre-release: open a private issue to the maintainer. No public disclosure before a fix.
-(A real disclosure policy + contact lands before any external users.)
+Serrier is pre-production and under active external review. Report privately — **do not open
+a public issue** and **do not include live secrets** in a report.
+
+- **Contact:** security@serrier.ai (until live, via a GitHub **private security advisory**:
+  repo → Security → "Report a vulnerability").
+- **Include:** affected component/commit, reproduction steps, observed vs. expected behavior,
+  and severity per [`docs/security/red-team-brief.md`](docs/security/red-team-brief.md).
+- **Our commitment:** acknowledge within 3 business days; a remediation plan or documented
+  risk acceptance within 10 business days; credit on request after a fix ships.
+- **Disclosure:** coordinated — no public details until a fix is released or a risk acceptance
+  is documented. Safe-harbor for good-faith research that avoids privacy violations, data
+  destruction, and service disruption.
+
+A finding that merely confirms a *documented* coverage limit (see the red-team brief) is a
+coverage report, not a vulnerability.

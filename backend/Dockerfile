@@ -1,15 +1,27 @@
 # Serrier backend — FastAPI + scanners. Scanners installeras i bilden så containern är
 # fullt kapabel; saknas någon ändå degraderar produkten tyst (base.tillganglig).
+#
+# Supply chain (F7): inga floating tags. uv pinnas till version; scanner-binärerna
+# CHECKSUM-verifieras. Checksummorna MÅSTE sättas som build-args av release-processen
+# (publicerade SHA256 från respektive release); tomt → bygget FAILAR (ingen tyst nedladdning).
 FROM python:3.12-slim AS scanners
 ARG GITLEAKS_VERSION=8.30.1
 ARG OSV_VERSION=2.2.3
+ARG GITLEAKS_SHA256
+ARG OSV_SHA256
 ADD https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz /tmp/gitleaks.tar.gz
 ADD https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_amd64 /usr/local/bin/osv-scanner
-RUN tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks && chmod +x /usr/local/bin/gitleaks /usr/local/bin/osv-scanner
+RUN test -n "$GITLEAKS_SHA256" && test -n "$OSV_SHA256" || \
+      { echo "FEL: sätt GITLEAKS_SHA256 och OSV_SHA256 (publicerade release-checksummor)"; exit 1; } \
+ && echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c - \
+ && echo "${OSV_SHA256}  /usr/local/bin/osv-scanner" | sha256sum -c - \
+ && tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks \
+ && chmod +x /usr/local/bin/gitleaks /usr/local/bin/osv-scanner
 
 FROM python:3.12-slim
-# uv för reproducerbar install; git behövs för gitleaks historik-läge.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# uv för reproducerbar install (PINNAD version, ej :latest); git för gitleaks historik-läge.
+ARG UV_VERSION=0.5.14
+COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /uvx /usr/local/bin/
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=scanners /usr/local/bin/gitleaks /usr/local/bin/osv-scanner /usr/local/bin/

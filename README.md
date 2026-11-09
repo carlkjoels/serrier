@@ -15,14 +15,20 @@ coverage limits honestly.
 
 ## Status
 
-**Phases 0–10 built.** Full MVP loop + all four modules + deployment hardening,
-multi-tenant auth, cross-detector correlation, regression tracking and SARIF/JSON
-export. Backend: 86 tests, ruff-clean. The product never claims "secure".
+**Phases 0–10 + Phase 11 (Pre-Send Guardian) built.** Full MVP loop + all four modules +
+deployment hardening, multi-tenant auth, cross-detector correlation, regression tracking,
+SARIF/JSON export — plus the **Pre-Send Guardian**: a local loopback proxy + CLI wrapper that
+inspects outbound AI traffic and blocks/redacts secrets & PII before they reach the provider
+(**streaming supported**). Backend: 170+ tests, ruff-clean. The product never claims "secure";
+see the [red-team brief](docs/security/red-team-brief.md) for the honest coverage limits.
+Security-review findings are being closed on the `security-remediation` branch.
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — modules, central finding schema, stack, trust boundary.
 - [`THREAT_MODEL.md`](THREAT_MODEL.md) — Serrier processes untrusted input; what can go wrong.
 - [`ROADMAP.md`](ROADMAP.md) — phased plan; the smallest meaningful MVP.
-- [`SECURITY.md`](SECURITY.md) — how Serrier secures *itself* (it follows its own advice).
+- [`SECURITY.md`](SECURITY.md) — how Serrier secures *itself* + coordinated disclosure.
+- [`docs/design/0001`](docs/design/0001-pre-send-guardian.md)–[`0003`](docs/design/0003-security-runtime-vision.md),
+  [`red-team-brief`](docs/security/red-team-brief.md) — Guardian design, proxy, runtime vision, review.
 
 ### What exists now
 

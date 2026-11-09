@@ -21,17 +21,20 @@ except ImportError:                                    # icke-POSIX
 
 # Resurs-HÄGN för scanner-subprocesser (F6). OBS: en subprocess är INGEN säkerhetssandbox —
 # detta begränsar resursåtgång (DoS av ett fientligt/enormt repo) men ger inte isolering.
-# Full isolering (lägsta behörighet, nätverksspärr, namespaces) kräver container/OS-sandbox;
-# se ARCHITECTURE. Gränserna sätts i barnet via preexec_fn (POSIX).
+# Full isolering (lägsta behörighet, nätverksspärr, namespaces) OCH ett pålitligt minnes-tak
+# kräver cgroups/container/OS-sandbox; se ARCHITECTURE. Gränserna sätts via preexec_fn (POSIX).
 _CPU_SEK = 120
-_MINNE_BYTES = 4 * 1024 ** 3        # 4 GB adressrymd — hägnar runaway utan att bryta normal scan
 _FIL_BYTES = 100 * 1024 ** 2        # 100 MB max outputfil
+# RLIMIT_AS (adressrymd) sätts INTE som default: det begränsar VIRTUELLT minne, vilket
+# moderna runtimes (t.ex. semgrep/OCaml) över-reserverar → svälter legitima scans. Äkta
+# minnes-cap = cgroups (container). minne > 0 kan opt-in:as där det passar.
+_MINNE_BYTES = 0
 
 
 def resursgrans(*, cpu: int = _CPU_SEK, minne: int = _MINNE_BYTES,
                 fstorlek: int = _FIL_BYTES) -> None:
-    """preexec_fn: sätt CPU-, adressrymds- och filstorleksgränser i scanner-barnprocessen.
-    minne=0 → hoppa adressrymdsgränsen (t.ex. i test där tolken måste kunna starta)."""
+    """preexec_fn: sätt CPU- och filstorleksgränser i scanner-barnprocessen (minne=0 →
+    ingen adressrymdsgräns; se kommentar ovan)."""
     if resource is None:
         return
     resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))

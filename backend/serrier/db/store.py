@@ -144,8 +144,17 @@ class Store:
             else:
                 s.add(GuardPolicy(org_id=org_id, tabell_json=js,
                                   failure_mode=failure_mode.value))
-            self._audit(s, org_id, "guard_policy", f"fel-läge {failure_mode.value}")
+            # F7: auditera FAKTISKA policyn (tabell + fel-läge), inte bara fel-läget.
+            self._audit(s, org_id, "guard_policy", f"fel-läge {failure_mode.value}; tabell {js}")
             s.commit()
+
+    def lista_audit(self, nyckel: str) -> list[dict]:
+        """Audit-händelser för en nyckel (project_id/org_id), äldst först."""
+        with self._Session() as s:
+            rader = s.scalars(select(AuditEvent).where(AuditEvent.project_id == nyckel)
+                              .order_by(AuditEvent.tid)).all()
+            return [{"handelse": r.handelse, "detalj": r.detalj,
+                     "tid": r.tid.isoformat()} for r in rader]
 
     def hamta_guard_policy(self, org_id: str) -> tuple[Policy, FailureMode]:
         """Orgens policy, eller STANDARD + balanced om ingen satts."""

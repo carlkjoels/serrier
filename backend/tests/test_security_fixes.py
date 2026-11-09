@@ -10,10 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 from upstream_harness import KontrolleradUpstream
 
+from serrier import analyst
 from serrier.api.app import app, get_store, krav_sakra_konfig
 from serrier.db.store import Store
-from serrier.guardian.policy import FailureMode
-from serrier.guardian.proxy import GuardProxy, Upstream
+from serrier.guardian.policy import FailureMode, policy_fran_dict
+from serrier.guardian.proxy import GuardProxy, Upstream, skriv_token
 from serrier.scanners import base as scanners_base
 
 
@@ -147,3 +148,37 @@ def test_f6_resursgrans_dodar_subprocess_som_overskrider(tmp_path) -> None:
         preexec_fn=lambda: scanners_base.resursgrans(minne=0, fstorlek=1_000_000), check=False)
     assert r.returncode != 0                              # gränsen slog till
     assert not mal.exists() or mal.stat().st_size <= 1_000_000
+
+
+# --- F7: städning (token-fil, audit-tak, policy-audit, analyst-env) --------
+def test_f7_token_skrivs_till_0600_fil_ej_stdout(tmp_path, capsys) -> None:
+    fil = skriv_token("hemlig-token-xyz", tmp_path / "tok")
+    assert fil.read_text() == "hemlig-token-xyz"
+    assert oct(fil.stat().st_mode & 0o777) == "0o600"    # bara ägaren
+    assert "hemlig-token-xyz" not in capsys.readouterr().out   # aldrig till stdout
+
+
+def test_f7_audit_ar_bunden_ringbuffert() -> None:
+    _, _, px = _proxy_rigg()
+    assert px.audit.maxlen == 1000
+    for i in range(1500):
+        px.audit.append({"i": i})
+    assert len(px.audit) == 1000                          # växer ej obegränsat
+    assert px.audit[-1]["i"] == 1499                       # senaste behålls
+
+
+def test_f7_policy_audit_innehaller_tabellen() -> None:
+    st = Store("sqlite:///:memory:")
+    org = st.skapa_org("t")
+    st.satt_guard_policy(org, policy_fran_dict({"high": "block"}), FailureMode.strict)
+    pol = [a for a in st.lista_audit(org) if a["handelse"] == "guard_policy"]
+    assert pol
+    assert "block" in pol[-1]["detalj"]                   # faktiska tabellen, ej bara fel-läge
+    assert "strict" in pol[-1]["detalj"]
+
+
+def test_f7_analyst_laser_inte_korsprojekt_env(monkeypatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert analyst.ladda_nyckel() is False                # inget implicit beroende
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
+    assert analyst.ladda_nyckel() is True
