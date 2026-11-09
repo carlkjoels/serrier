@@ -20,3 +20,6 @@ scan:  ## Skanna ett repo lokalt: make scan REPO=/sökväg (ingen server behövs
 
 guard:  ## Kör ett AI-verktyg genom Pre-Send Guardian: make guard CMD="claude"
 	@cd backend && uv run serrier-guard run -- $(CMD)
+
+tray:  ## Tray-/menubar-klient (kräver display + 'uv sync --extra tray')
+	@cd backend && uv run --extra tray serrier tray

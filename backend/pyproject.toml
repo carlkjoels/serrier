@@ -16,6 +16,8 @@ dependencies = [
 [project.optional-dependencies]
 # Postgres-drivrutin — bara i container/prod. SQLite kräver ingen extra dep.
 postgres = ["psycopg[binary]>=3.2"]
+# Valfri tray-/menubar-klient (steg 2). Kräver en display. `uv sync --extra tray`.
+tray = ["pystray>=0.19", "pillow>=10"]
 
 [project.scripts]
 # Enhetlig CLI: `serrier up|down|status | run -- <cmd> | scan <path>`

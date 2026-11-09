@@ -84,6 +84,10 @@ serrier status             # running? port?
 serrier down               # stop
 ```
 
+Optional **tray / menu-bar** client (needs a desktop + `uv sync --extra tray`): `serrier tray`
+— a thin icon showing on/off + a block/redact/allow tally, with Start/Stop/Open-dashboard. It
+only *controls and mirrors* the daemon; it never owns its lifecycle.
+
 **Per-command (wrap one tool):**
 
 ```bash
