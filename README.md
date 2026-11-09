@@ -77,10 +77,14 @@ The wrapper starts the Guardian proxy on loopback, injects a one-time token via 
 secrets → **block**, cards/PII → **redact** (safe JSON rewrite, else block), clean → forward.
 Detection is **local and deterministic** — the raw text never leaves your machine.
 
+**Streaming works:** SSE / `stream=True` is relayed without buffering (verified with the real
+Anthropic SDK's `messages.stream`), so Claude CLI streaming is preserved. Streaming the
+response does **not** inspect response *content* — request-side prevention is the guarantee.
+
 **Honest coverage:** only clients that respect `*_BASE_URL` and actually route through the
 proxy are protected; a tool that hardcodes a direct connection bypasses it. **No transparent
-MITM.** **Streaming responses (SSE / `stream=True`) are not supported in v1** (the proxy
-buffers responses). Design + threat model: [`docs/design/0002-guardian-proxy-adapter.md`](docs/design/0002-guardian-proxy-adapter.md).
+MITM.** REDACT is JSON-only (else block). Design + threat model + residual risks:
+[`docs/design/0002-guardian-proxy-adapter.md`](docs/design/0002-guardian-proxy-adapter.md).
 
 ## MVP scope (locked small, on purpose)
 

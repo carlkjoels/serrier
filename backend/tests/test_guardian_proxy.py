@@ -8,6 +8,10 @@ import base64
 import socket
 
 import httpx
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+from starlette.routing import Route
 from starlette.testclient import TestClient
 from upstream_harness import KontrolleradUpstream
 
@@ -181,6 +185,42 @@ def test_body_for_stor_avvisas(monkeypatch) -> None:
     r = c.post("/test/v1/messages", content=b"x" * 500)
     assert r.status_code == 413
     assert up.antal_bytes == 0                             # inspekterades/forwardades aldrig
+
+
+# --- streaming (SSE relayas utan att buffras; svaret inspekteras EJ) -------
+def _sse_upstream() -> Starlette:
+    async def handler(request: Request) -> StreamingResponse:
+        await request.body()                              # request-sidan är redan inspekterad
+        async def events():
+            for i in range(3):
+                yield f"data: event{i}\n\n".encode()
+        return StreamingResponse(events(), media_type="text/event-stream")
+    return Starlette(routes=[Route("/{p:path}", handler, methods=["POST"])])
+
+
+def test_sse_relayas_och_content_type_bevaras(monkeypatch) -> None:
+    _publik_dns(monkeypatch)
+    klient = httpx.AsyncClient(transport=httpx.ASGITransport(app=_sse_upstream()))
+    px = GuardProxy(klient=klient, allowlist=ALLOW)
+    c = TestClient(px.app())
+    with c.stream("POST", "/test/v1/stream", content=b'{"msg":"ren"}') as r:
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers.get("content-type", "")
+        assert "content-length" not in r.headers              # strömmas, ej buffrat
+        rader = [rad for rad in r.iter_lines() if rad.startswith("data:")]
+    assert rader == ["data: event0", "data: event1", "data: event2"]
+
+
+def test_streaming_request_inspekteras_fortfarande_block(monkeypatch) -> None:
+    # Request-sidan inspekteras FÖRE forward även mot en streaming-upstream.
+    _publik_dns(monkeypatch)
+    rec = KontrolleradUpstream()
+    klient = httpx.AsyncClient(transport=httpx.ASGITransport(app=_sse_upstream()))
+    px = GuardProxy(klient=klient, allowlist=ALLOW)
+    c = TestClient(px.app())
+    r = c.post("/test/v1/stream", content=f'{{"p":"{RA}"}}'.encode())
+    assert r.status_code == 403                               # blockerad före streaming
+    assert rec.antal_bytes == 0
 
 
 # --- kontrakt --------------------------------------------------------------

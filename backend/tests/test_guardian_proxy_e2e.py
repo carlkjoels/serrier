@@ -11,6 +11,7 @@ ingen osäkrad genväg — det är ett annat testområde. Syntetisk data."""
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import threading
 import time
@@ -19,7 +20,7 @@ import httpx
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 from upstream_harness import KontrolleradUpstream
 
@@ -124,6 +125,34 @@ def test_e2e_redirect_foljs_inte() -> None:
         # Proxyn följer ALDRIG redirect (→ intern host = SSRF); 302 returneras rått
         assert r.status_code == 302
         assert r.headers.get("location") == "http://10.0.0.9/intern"
+
+
+def _strom_upstream() -> Starlette:
+    """Upstream som strömmar 5 chunks med fördröjning — buffring skulle kollapsa tidsspridningen."""
+    async def handler(request: Request) -> StreamingResponse:
+        await request.body()
+        async def gen():
+            for i in range(5):
+                yield f"chunk{i}\n".encode()
+                await asyncio.sleep(0.05)
+        return StreamingResponse(gen(), media_type="text/plain")
+    return Starlette(routes=[Route("/{p:path}", handler, methods=["POST"])])
+
+
+def test_e2e_streaming_inkrementellt() -> None:
+    up_port, px_port = _ledig_port(), _ledig_port()
+    with _Live(_strom_upstream(), up_port), _Live(_proxy(up_port).app(), px_port):
+        c = httpx.Client(timeout=10)
+        ankomster, bitar = [], []
+        with c.stream("POST", f"http://127.0.0.1:{px_port}/test/x",
+                      content=b'{"m":"ren"}') as r:
+            assert r.status_code == 200
+            for chunk in r.iter_raw():
+                ankomster.append(time.monotonic())
+                bitar.append(chunk)
+        assert b"".join(bitar) == b"chunk0\nchunk1\nchunk2\nchunk3\nchunk4\n"  # allt, i ordning
+        # Inkrementellt över nätet: spridning i ankomsttid (buffring → ~0). 5×50ms ≈ 250ms.
+        assert ankomster[-1] - ankomster[0] > 0.1
 
 
 def test_e2e_ignorerar_ambient_https_proxy(monkeypatch) -> None:

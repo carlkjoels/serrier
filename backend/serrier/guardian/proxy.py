@@ -17,6 +17,7 @@ import json
 import os
 import secrets
 import socket
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit, urlunsplit
@@ -25,7 +26,7 @@ import httpx
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from serrier.guardian.enforcement import EnforcementLevel, ProxyHandling, handling_for
@@ -208,8 +209,12 @@ class GuardProxy:
                           if k.lower() not in _SLOPPA_HEADERS}
         vidare_headers["host"] = delar.netloc                 # korrekt Host trots pinnad IP
         try:
-            svar = await self.klient.request(request.method, url, headers=vidare_headers,
-                                             content=skickad_body, extensions=extensions)
+            # stream=True → svaret buffras ALDRIG; vi relayar råa chunks (SSE/chunking/
+            # backpressure bevaras). OBS: svarsINNEHÅLLET inspekteras inte — medvetet
+            # avgränsat (request-sidan är redan inspekterad ovan).
+            req = self.klient.build_request(request.method, url, headers=vidare_headers,
+                                            content=skickad_body, extensions=extensions)
+            svar = await self.klient.send(req, stream=True)
         except httpx.HTTPError as e:
             # Nätfel vid vidarebefordran → fail-closed (skicka aldrig vidare blint).
             self._logga(upstream.bas, "block(upstream-fel)", decision, 0)
@@ -219,8 +224,17 @@ class GuardProxy:
         self._logga(upstream.bas, handling.value, decision, len(skickad_body))
         ut_headers = {k: v for k, v in svar.headers.items()
                       if k.lower() not in _SLOPPA_HEADERS}
-        return Response(content=svar.content, status_code=svar.status_code,
-                        headers=ut_headers)
+
+        async def _kropp() -> AsyncIterator[bytes]:
+            # Relaya chunks allteftersom; stäng alltid upstream (städning + backpressure).
+            # Avbruten klient/fel → generatorn stängs, aclose frigör anslutningen.
+            try:
+                async for chunk in svar.aiter_raw():
+                    yield chunk
+            finally:
+                await svar.aclose()
+
+        return StreamingResponse(_kropp(), status_code=svar.status_code, headers=ut_headers)
 
     def app(self) -> Starlette:
         metoder = ["GET", "POST", "PUT", "DELETE", "PATCH"]

@@ -30,11 +30,17 @@ with the **real Anthropic SDK** (dummy key, controlled upstream): clean parses, 
 403 with the upstream unchanged (leak-through = 0 through the real SDK). Covered/bypass paths
 are documented in the module docstring; no false guarantees of process isolation.
 
-### Streaming & compatibility limitations (v1)
-- **Streaming responses (SSE / `stream=True`) are NOT supported.** The proxy buffers the
-  upstream response (`svar.content`) before returning, so a streamed response is not relayed
-  incrementally and a streaming client will break or lose streaming. Request-side prevention
-  only; streaming support is future work.
+### Streaming support (2026-11-09) — tightly scoped
+- **Streaming responses (SSE / `stream=True`) ARE supported.** The proxy inspects the full
+  request *before* forwarding (block/redact unchanged), then relays the upstream response
+  **without buffering** (`klient.send(stream=True)` → `StreamingResponse` over `aiter_raw()`),
+  preserving SSE events, content-type, chunking and backpressure; the upstream connection is
+  always closed on completion/abort. Verified over real TCP (chunks arrive incrementally) and
+  with the **real Anthropic SDK** (`client.messages.stream(...)` reconstructs the text; a
+  streaming request carrying a secret is blocked 403 before forwarding).
+- **Scope (deliberate):** streaming the response does **not** mean Serrier inspects response
+  *content* — response-side inspection is a separate, unbuilt function. Request-side
+  prevention is the guarantee.
 - Request bodies are **buffered** (needed for inspection) up to `max_body` (10 MB) → very
   large or truly streamed request bodies are capped.
 - REDACT rewriting is **JSON-only**; other content types degrade to BLOCK.

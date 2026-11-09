@@ -88,7 +88,8 @@ is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never
   Hardened: DNS-TOCTOU pinned IP, loopback token-auth, per-org policy, body limit, verified
   over **real TCP**. **Model C CLI wrapper built** (`serrier-guard run -- <cmd>`): in-process
   proxy, token via base_url path, fail-closed, verified with the **real Anthropic SDK**.
-  **Transparent TLS MITM rejected.** Streaming (SSE) unsupported in v1.
+  **Transparent TLS MITM rejected.** **Streaming (SSE) supported** — relayed without
+  buffering, request-side prevention preserved; verified with the real Anthropic SDK.
 
 ## Target picture (NOT a backlog — a direction)
 The strategic vision (Secure AI Adoption Infrastructure: policy/model gateway, agent
