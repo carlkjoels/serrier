@@ -20,7 +20,7 @@ import socket
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 import uvicorn
@@ -31,7 +31,7 @@ from starlette.routing import Route
 
 from serrier.guardian.enforcement import EnforcementLevel, ProxyHandling, handling_for
 from serrier.guardian.inspect import GuardDecision, inspect
-from serrier.guardian.policy import STANDARD, FailureMode, Policy
+from serrier.guardian.policy import STANDARD, AnalysisStatus, FailureMode, Policy, besluta
 
 if TYPE_CHECKING:
     from serrier.db.store import Store
@@ -180,9 +180,19 @@ class GuardProxy:
         body = await _las_begransad(request, self.max_body)
         if body is None:
             return JSONResponse(status_code=413, content={"serrier": "body för stor"})
-        text = body.decode("utf-8", "replace")
         policy, mode = self._policy_och_mode()
-        decision = inspect(text, failure_mode=mode, policy=policy)
+        # F5: en kodad body (Content-Encoding ≠ identity) kan inte inspekteras som text.
+        # Att detektorn inte kastade undantag betyder INTE att innehållet gick att inspektera
+        # → analysis_status=unknown (aldrig tyst 'ok'); fel-läget avgör (UNKNOWN-disciplinen).
+        ce = request.headers.get("content-encoding", "").strip().lower()
+        if ce and ce != "identity":
+            v = besluta([], analysis_status=AnalysisStatus.unknown, failure_mode=mode,
+                        policy=policy)
+            decision = GuardDecision(action=v.action, analysis_status=v.analysis_status,
+                                     failure_mode=v.failure_mode, safe_text="",
+                                     reasons=v.reasons, findings=[])
+        else:
+            decision = inspect(body.decode("utf-8", "replace"), failure_mode=mode, policy=policy)
         handling = handling_for(decision.action)
 
         # UNKNOWN får aldrig tyst bli forward i strict/balanced — handling_for ger redan
@@ -200,6 +210,23 @@ class GuardProxy:
                 return self._block_svar(decision, "kunde ej sanera body säkert → block")
             skickad_body = sanerad
 
+        # F4 — request coverage: query-strängen inspekteras också (kan bära hemligheter). Vi
+        # redigerar inte URL:er → känsligt i query = BLOCK. HEADERS är en MEDVETEN täcknings-
+        # gräns: de vidarebefordras (utom hop-by-hop) men innehålls-inspekteras INTE — en
+        # leverantörs egen auth-header måste vidare. Modell: body+query omfattas, headers ej.
+        if request.url.query:
+            q = inspect(unquote(request.url.query), failure_mode=mode, policy=policy)
+            if handling_for(q.action) is not ProxyHandling.forward:
+                self._logga(upstream.bas, "block(query)", q, 0)
+                return self._block_svar(q, "känsligt i query-strängen stoppat")
+
+        return await self._vidarebefordra(request, upstream, skickad_body, decision,
+                                          handling.value)
+
+    async def _vidarebefordra(self, request: Request, upstream: Upstream, skickad_body: bytes,
+                              decision: GuardDecision, handling_etikett: str) -> Response:
+        """SSRF-pinnad, TLS-verifierad, icke-redirect-följande vidarebefordran. Svaret
+        STRÖMMAS rått (SSE/chunking/backpressure bevaras); svarsINNEHÅLLET inspekteras ej."""
         delar = urlsplit(upstream.bas)
         host = delar.hostname or ""
         if self.validera_ip:
@@ -223,30 +250,24 @@ class GuardProxy:
                           if k.lower() not in _SLOPPA_HEADERS}
         vidare_headers["host"] = delar.netloc                 # korrekt Host trots pinnad IP
         try:
-            # stream=True → svaret buffras ALDRIG; vi relayar råa chunks (SSE/chunking/
-            # backpressure bevaras). OBS: svarsINNEHÅLLET inspekteras inte — medvetet
-            # avgränsat (request-sidan är redan inspekterad ovan).
             req = self.klient.build_request(request.method, url, headers=vidare_headers,
                                             content=skickad_body, extensions=extensions)
             svar = await self.klient.send(req, stream=True)
         except httpx.HTTPError as e:
-            # Nätfel vid vidarebefordran → fail-closed (skicka aldrig vidare blint).
             self._logga(upstream.bas, "block(upstream-fel)", decision, 0)
             return JSONResponse(status_code=502,
                                 content={"serrier": "upstream-fel", "detalj": type(e).__name__})
 
-        self._logga(upstream.bas, handling.value, decision, len(skickad_body))
+        self._logga(upstream.bas, handling_etikett, decision, len(skickad_body))
         ut_headers = {k: v for k, v in svar.headers.items()
                       if k.lower() not in _SLOPPA_HEADERS}
 
         async def _kropp() -> AsyncIterator[bytes]:
-            # Relaya chunks allteftersom; stäng alltid upstream (städning + backpressure).
-            # Avbruten klient/fel → generatorn stängs, aclose frigör anslutningen.
             try:
                 async for chunk in svar.aiter_raw():
                     yield chunk
             finally:
-                await svar.aclose()
+                await svar.aclose()                           # städning + backpressure
 
         return StreamingResponse(_kropp(), status_code=svar.status_code, headers=ut_headers)
 

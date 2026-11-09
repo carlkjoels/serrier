@@ -9,7 +9,16 @@ from upstream_harness import KontrolleradUpstream
 
 from serrier.api.app import app, get_store, krav_sakra_konfig
 from serrier.db.store import Store
+from serrier.guardian.policy import FailureMode
 from serrier.guardian.proxy import GuardProxy, Upstream
+
+
+def _proxy_rigg(**kw):
+    up = KontrolleradUpstream()
+    klient = httpx.AsyncClient(transport=httpx.ASGITransport(app=up.app()))
+    px = GuardProxy(klient=klient, allowlist=[Upstream("test", "https://u.test")],
+                    validera_ip=False, **kw)
+    return up, TestClient(px.app()), px
 
 
 def _klient(store: Store) -> TestClient:
@@ -85,3 +94,38 @@ def test_f3_stor_chunked_body_avvisas_utan_att_buffras() -> None:
     r = c.post("/test/v1/x", content=stor_chunked())
     assert r.status_code == 413
     assert up.antal_bytes == 0                            # aldrig inspekterad/forwardad
+
+
+# --- F5: kodad/ogenomskinlig body → UNKNOWN (aldrig tyst 'ok') -------------
+def test_f5_gzip_body_blir_unknown_balanced_blockerar() -> None:
+    up, c, px = _proxy_rigg(failure_mode=FailureMode.balanced)
+    # Content-Encoding: gzip → kan ej inspekteras som text → unknown → balanced blockerar
+    r = c.post("/test/v1/x", content=b"\x1f\x8b\x08rubbish",
+               headers={"Content-Encoding": "gzip"})
+    assert r.status_code == 403
+    assert up.antal_bytes == 0
+    assert px.audit[-1]["analysis_status"] == "unknown"   # aldrig 'ok'/'inspekterat'
+
+
+def test_f5_gzip_body_permissive_forwardas_men_markt_unknown() -> None:
+    _, c, px = _proxy_rigg(failure_mode=FailureMode.permissive)
+    r = c.post("/test/v1/x", content=b"\x1f\x8b\x08rubbish",
+               headers={"Content-Encoding": "gzip"})
+    assert r.status_code == 200                            # fail-open i permissive
+    assert px.audit[-1]["analysis_status"] == "unknown"   # men ALDRIG markerad inspekterad
+
+
+# --- F4: query-strängen inspekteras (headers = medveten täckningsgräns) ----
+def test_f4_hemlighet_i_query_blockeras() -> None:
+    up, c, _ = _proxy_rigg()
+    r = c.post("/test/v1/x?key=sk-ant-api03-REALSECRET1234567890abcDEF",
+               content=b'{"msg":"ren"}')
+    assert r.status_code == 403                            # känsligt i query → block
+    assert up.antal_bytes == 0
+
+
+def test_f4_ren_query_slapper_igenom() -> None:
+    up, c, _ = _proxy_rigg()
+    r = c.post("/test/v1/x?model=claude&max_tokens=10", content=b'{"msg":"ren"}')
+    assert r.status_code == 200
+    assert up.antal_bytes > 0
