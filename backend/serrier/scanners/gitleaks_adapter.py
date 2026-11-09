@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from serrier.core.findings import Category, Confidence, Evidence, Finding, Severity
-from serrier.scanners.base import inom_roten
+from serrier.scanners.base import inom_roten, resursgrans
 
 _TIMEOUT = 180
 
@@ -57,7 +57,8 @@ class GitleaksAdapter:
                 subprocess.run(  # noqa: S603 — argv-array, ingen shell, binär vi kontrollerar
                     [self._binar, *delkommando, "--report-format", "json",
                      "--report-path", str(rapport), "--redact"],
-                    capture_output=True, timeout=_TIMEOUT, check=False)
+                    capture_output=True, timeout=_TIMEOUT, check=False,
+                    preexec_fn=resursgrans)
                 data = json.loads(rapport.read_text()) if rapport.exists() else []
             except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
                 return []

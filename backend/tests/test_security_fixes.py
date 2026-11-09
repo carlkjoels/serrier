@@ -2,6 +2,9 @@
 Granskaren ska försöka ta sig RUNT dessa — testerna pinnar bara att fixarna gör vad de ska.
 Syntetisk data."""
 
+import subprocess
+import sys
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +14,7 @@ from serrier.api.app import app, get_store, krav_sakra_konfig
 from serrier.db.store import Store
 from serrier.guardian.policy import FailureMode
 from serrier.guardian.proxy import GuardProxy, Upstream
+from serrier.scanners import base as scanners_base
 
 
 def _proxy_rigg(**kw):
@@ -129,3 +133,17 @@ def test_f4_ren_query_slapper_igenom() -> None:
     r = c.post("/test/v1/x?model=claude&max_tokens=10", content=b'{"msg":"ren"}')
     assert r.status_code == 200
     assert up.antal_bytes > 0
+
+
+# --- F6: scanner-resursgränser (rlimit i subprocess-barnet) ---------------
+def test_f6_resursgrans_dodar_subprocess_som_overskrider(tmp_path) -> None:
+    if scanners_base.resource is None:
+        pytest.skip("rlimit är POSIX-only")
+    mal = tmp_path / "stor"
+    # Skriv 10 MB med 1 MB filstorleksgräns → barnet dödas av RLIMIT_FSIZE (SIGXFSZ).
+    r = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", f"open({str(mal)!r},'w').write('a'*10_000_000)"],
+        capture_output=True,
+        preexec_fn=lambda: scanners_base.resursgrans(minne=0, fstorlek=1_000_000), check=False)
+    assert r.returncode != 0                              # gränsen slog till
+    assert not mal.exists() or mal.stat().st_size <= 1_000_000

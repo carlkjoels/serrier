@@ -66,7 +66,10 @@ each input shown. The AI analyst may *explain* the score; it never *is* the scor
 Scanned repos, files, scraped sites, AI output, and external-tool stdout are **untrusted
 data**. Rules:
 
-1. Scanners run isolated and resource-limited; scanned code is never executed.
+1. Scanners run as argv subprocesses (no shell) with **resource limits** (CPU/memory/output
+   rlimits via preexec) and path confinement; scanned code is never executed. Honest limit:
+   a subprocess is **not** a security sandbox — true isolation (least privilege, network
+   egress block, namespaces) requires a container/OS sandbox and is future work (F6).
 2. Untrusted content can never modify Serrier's system instructions or security policy
    (defends against prompt injection hidden in files/scraped content).
 3. Claude receives the **minimum necessary evidence, secrets redacted** — never whole

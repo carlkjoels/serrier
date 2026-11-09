@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 from serrier.core.findings import Category, Confidence, Evidence, Finding, Severity
-from serrier.scanners.base import inom_roten
+from serrier.scanners.base import inom_roten, resursgrans
 
 _TIMEOUT = 180
 _SEV = {"CRITICAL": Severity.critical, "HIGH": Severity.high, "MODERATE": Severity.medium,
@@ -82,7 +82,8 @@ class OsvAdapter:
             return []
         try:
             r = subprocess.run(self._scan_args(projekt_rot),  # noqa: S603 — argv, ingen shell
-                capture_output=True, text=True, timeout=_TIMEOUT, check=False)
+                capture_output=True, text=True, timeout=_TIMEOUT, check=False,
+                preexec_fn=resursgrans)
             data = json.loads(r.stdout) if r.stdout.strip() else {"results": []}
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return []
