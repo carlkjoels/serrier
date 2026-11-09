@@ -1,12 +1,13 @@
-// Serrier Pre-Send Guardian — content-script (0005 steg 2, scaffold).
+// Serrier Pre-Send Guardian — content-script (0005 steg 2–3, scaffold).
 //
 // PEP:en i browsern. Hookar compose-rutans "skicka" på en stödd AI-sajt, läser
 // texten, frågar den lokala daemonen via background-workern, och VERKSTÄLLER
-// verdiktet (block / redact / warn / allow) FÖRE sändning.
+// verdiktet (block / redact / warn / allow) FÖRE sändning. Själva beslutet fattas i
+// decision.js (ren, testbar); här mappas det bara till DOM-åtgärder.
 //
-// ÄRLIG BEGRÄNSNING (0005 §5): detta är DOM-kopplat och skört. Sajtens selektorer
-// (nedan) går sönder när leverantören bygger om UI:t. När vi inte kan läsa fältet
-// → UNKNOWN, aldrig tyst allow. Detta är scaffold-kvalitet, inte publicerat.
+// ÄRLIG BEGRÄNSNING (0005 §5): DOM-kopplat och skört. Sajtens selektorer (nedan) går
+// sönder när leverantören bygger om UI:t. När vi inte kan läsa fältet → UNKNOWN, aldrig
+// tyst allow. Scaffold-kvalitet, inte publicerat.
 
 // --- Per-sajt-selektorer (det som går sönder; medvetet isolerat) -----------
 const SAJTER = [
@@ -14,6 +15,11 @@ const SAJTER = [
     värd: "claude.ai",
     editor: 'div[contenteditable="true"]',
     skicka: 'button[aria-label*="Send" i], button[aria-label*="Skicka" i]',
+  },
+  {
+    värd: "chatgpt.com",
+    editor: '#prompt-textarea, div[contenteditable="true"]',
+    skicka: 'button[data-testid="send-button"], button[aria-label*="Send" i]',
   },
 ];
 
@@ -33,9 +39,8 @@ function start() {
   // Fånga BÅDE Enter och klick på skicka-knappen i capture-fas, så vi hinner före
   // sajtens egna hanterare.
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Enter" && !ev.shiftKey && editorEl() && editorEl().contains(ev.target)) {
-      grinda(ev);
-    }
+    const e = editorEl();
+    if (ev.key === "Enter" && !ev.shiftKey && e && e.contains(ev.target)) grinda(ev);
   }, true);
   document.addEventListener("click", (ev) => {
     const b = skickaEl();
@@ -43,53 +48,43 @@ function start() {
   }, true);
 }
 
-// Grinden: stoppa sändningen, fråga daemonen, agera på verdiktet.
+// Grinden: stoppa sändningen, fråga daemonen, och tillämpa decision.js-verdiktet.
 async function grinda(ev) {
   if (bypass) { bypass = false; return; } // vår egen åter-sändning — släpp igenom
   ev.preventDefault();
   ev.stopImmediatePropagation();
 
   const text = läsText();
-  if (text === null) {
-    // Kan inte läsa fältet → UNKNOWN (inte "allow").
-    return beslutaLokalUnknown("kunde inte läsa compose-rutan (layout ändrad?)");
-  }
-  if (!text) return; // tomt → inget att skicka
+  if (text !== null && text.trim() === "") return; // tomt → inget att skicka
 
-  let svar;
-  try {
-    svar = await chrome.runtime.sendMessage({ type: "inspect", text });
-  } catch (_e) {
-    svar = { ok: false, reason: "unreachable" };
+  let svar = null;
+  if (text !== null) {
+    try {
+      svar = await chrome.runtime.sendMessage({ type: "inspect", text });
+    } catch (_e) {
+      svar = { ok: false, reason: "unreachable" };
+    }
   }
+  const config = await chrome.runtime
+    .sendMessage({ type: "config" })
+    .catch(() => ({ failMode: "balanced", failClosed: true })); // ingen kontakt → fail-closed
 
-  if (!svar || !svar.ok) {
-    const skäl = svar && svar.reason === "no-token" ? "ingen token konfigurerad (öppna inställningar)"
-      : svar && svar.reason === "unreachable" ? "Serrier-daemonen svarar inte (kör `serrier up`)"
-      : "daemon-fel";
-    return beslutaLokalUnknown(skäl);
-  }
-
-  const d = svar.decision;
-  const okänt = d.analysis_status === "unknown";
-  switch (d.handling) {
-    case "forward":
-      return skicka(okänt ? märk(d, "okänt innehåll — vidarebefordrat enligt permissive-läge") : null);
-    case "redact":
-      sättText(d.safe_text || "");
-      return skicka(banner("warn", "Serrier redakterade känsligt innehåll innan sändning."));
-    case "block":
-    default:
-      return banner("block", beskriv(d));
-  }
+  tillämpa(serrierBeslut(text, svar, config)); // serrierBeslut: global från decision.js
 }
 
-// Lokal UNKNOWN (daemon nere / layout-miss): fel-läget avgör, ALDRIG tyst allow.
-async function beslutaLokalUnknown(skäl) {
-  const c = await chrome.runtime.sendMessage({ type: "config" }).catch(() => ({ failClosed: true, failMode: "balanced" }));
-  const strikt = c.failClosed || c.failMode === "strict";
-  if (strikt) return banner("block", `Blockerat (fail-closed): ${skäl}. UNKNOWN ≠ säkert.`);
-  return bannerBekräfta(`UNKNOWN: ${skäl}. Skicka ändå?`);
+function tillämpa(b) {
+  switch (b.kind) {
+    case "allow":
+      return skicka(b.unknown ? banner("warn", b.reason) : null);
+    case "redact":
+      sättText(b.safeText || "");
+      return skicka(banner("warn", b.reason));
+    case "confirm":
+      return bannerBekräfta(b.reason);
+    case "block":
+    default:
+      return banner("block", b.reason);
+  }
 }
 
 // --- sändning + redigering -------------------------------------------------
@@ -139,10 +134,6 @@ function bannerBekräfta(text) {
   return host;
 }
 
-function märk(_d, text) { return banner("warn", text); }
-function beskriv(d) {
-  const regler = (d.findings || []).map((f) => f.regel).filter(Boolean);
-  const vad = regler.length ? ` (${[...new Set(regler)].join(", ")})` : "";
-  return `Blockerat: känsligt innehåll stoppat innan sändning${vad}. Inget skickades.`;
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
