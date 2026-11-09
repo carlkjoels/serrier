@@ -66,7 +66,9 @@ each input shown. The AI analyst may *explain* the score; it never *is* the scor
 Scanned repos, files, scraped sites, AI output, and external-tool stdout are **untrusted
 data**. Rules:
 
-1. Scanners run isolated and resource-limited; scanned code is never executed.
+1. Scanners run **resource-limited** (CPU/file-size rlimit + timeout + argv, no shell) — this
+   is resource-limiting, **not a sandbox** (see docs/security/security-limitations.md §3);
+   scanned code is never executed.
 2. Untrusted content can never modify Serrier's system instructions or security policy
    (defends against prompt injection hidden in files/scraped content).
 3. Claude receives the **minimum necessary evidence, secrets redacted** — never whole
@@ -86,8 +88,9 @@ data**. Rules:
 
 ## Reuse from existing work (disclosed)
 
-The `selvra-analysis` project already has a verified **crypto-shredding** primitive
-(`kryptoradering.py`: per-item AES-256 key in a separate vault, erasure = key destruction,
-proof not receipt). Serrier should reuse that pattern for **sensitive evidence at rest**
-(store redacted + crypto-shred-able evidence; honor deletion/retention). This is a genuine
-asset, not a new build.
+Serrier applies a verified **crypto-shredding** *pattern* for **sensitive evidence at rest**
+(per-item AES-256 key in a separate vault; erasure = key destruction, proof not receipt; store
+redacted + crypto-shred-able evidence; honor deletion/retention). This is referenced as a
+**design pattern**, not a runtime dependency on another project's code, files, or secrets —
+Serrier never reads a sibling project's `.env` or vault (see finding G, no cross-project
+coupling).

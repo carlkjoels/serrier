@@ -3,6 +3,11 @@
 # Vänta in Postgres om vi pekar på en (compose startar dem parallellt).
 set -e
 
+# Fail-closed konfig-grind (A): vägra starta i osäkert prod-läge INNAN migrering.
+# Samma regel som lifespanens krav_sakra_konfig, men tidigare och med tydligare fel.
+echo "serrier: validerar konfiguration…"
+uv run python -c "from serrier.api.app import krav_sakra_konfig; krav_sakra_konfig()"
+
 case "$SERRIER_DB_URL" in
   postgresql*|postgres*)
     echo "serrier: väntar på databasen…"

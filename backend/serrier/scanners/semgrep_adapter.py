@@ -14,6 +14,7 @@ from pathlib import Path
 
 from serrier.core.findings import Category, Confidence, Evidence, Finding, Severity
 from serrier.scanners.base import inom_roten
+from serrier.scanners.resurser import resursgrans
 
 _TIMEOUT = 180
 _REGLER = Path(__file__).parent / "semgrep_rules" / "serrier.yaml"
@@ -69,7 +70,8 @@ class SemgrepAdapter:
             r = subprocess.run(  # noqa: S603 — argv, ingen shell, binär vi kontrollerar
                 [self._binar, "scan", *self._config_args(), "--json", "--quiet",
                  "--disable-version-check", str(projekt_rot)],
-                capture_output=True, text=True, timeout=_TIMEOUT, check=False)
+                capture_output=True, text=True, timeout=_TIMEOUT, check=False,
+                preexec_fn=resursgrans())  # F: CPU/filstorleks-rlimit (EJ AS; svälter semgrep)
             data = json.loads(r.stdout) if r.stdout.strip() else {"results": []}
         except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
             return []

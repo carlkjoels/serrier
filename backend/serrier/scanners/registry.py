@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from serrier.core.findings import Finding
+from serrier.core.sokvag import validera_scan_sokvag
 from serrier.ingest.dedup import deduplicera
 from serrier.scanners.base import Scanner
 from serrier.scanners.builtin import InbyggdHemlighetsskanner
@@ -24,6 +25,7 @@ def tillgangliga() -> list[Scanner]:
 
 
 def kor_skanners(rot: Path, project_id: str) -> list[Finding]:
+    rot = validera_scan_sokvag(rot)        # B: confinement vid scannergränsen (defense in depth)
     fynd: list[Finding] = []
     for s in tillgangliga():
         fynd.extend(s.skanna(rot, project_id))

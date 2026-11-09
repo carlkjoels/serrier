@@ -17,10 +17,13 @@ import json
 import os
 import secrets
 import socket
+import stat
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 import uvicorn
@@ -31,12 +34,28 @@ from starlette.routing import Route
 
 from serrier.guardian.enforcement import EnforcementLevel, ProxyHandling, handling_for
 from serrier.guardian.inspect import GuardDecision, inspect
-from serrier.guardian.policy import STANDARD, FailureMode, Policy
+from serrier.guardian.policy import (
+    STANDARD,
+    AnalysisStatus,
+    FailureMode,
+    Policy,
+    besluta,
+)
 
 if TYPE_CHECKING:
     from serrier.db.store import Store
 
 _TOKEN_HEADER = "x-serrier-token"  # noqa: S105 — header-namn, inte en hemlighet
+_AUDIT_MAX = 1000                   # audit-loggen är BUNDEN (ringbuffert) → växer inte obegränsat
+
+
+def skriv_token(token: str, path: Path) -> None:
+    """Skriv en proxy-token till en 0600-fil (G) — bara ägaren kan läsa den, och den hamnar
+    ALDRIG i stdout/loggar. Delas av daemonen (stabil token) och foreground-main (engångs)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch(mode=stat.S_IRUSR | stat.S_IWUSR, exist_ok=True)   # 0600
+    path.chmod(stat.S_IRUSR | stat.S_IWUSR)                       # tvinga 0600 även om den fanns
+    path.write_text(token)
 
 
 @dataclass(frozen=True)
@@ -109,7 +128,7 @@ class GuardProxy:
     # Host-header-allowlist mot DNS-rebinding (0004 §4) — krävs i alltid-på/daemon-läge.
     # None = ingen kontroll (dev); satt = avvisa Host som inte är en förväntad loopback-adress.
     tillaten_host: set[str] | None = None
-    audit: list[dict] = field(default_factory=list)
+    audit: deque[dict] = field(default_factory=lambda: deque(maxlen=_AUDIT_MAX))
 
     namn: str = "local-proxy"
     enforcement_level: EnforcementLevel = EnforcementLevel.guaranteed
@@ -163,7 +182,24 @@ class GuardProxy:
             "analysis_status": d.analysis_status.value,
             "reasons": [r.forklaring for r in d.reasons]})
 
-    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911, PLR0912 — grind-klausuler
+    @staticmethod
+    async def _las_begransad(request: Request, grans: int) -> bytes | None:
+        """Läs request-body:n strömmande och avbryt så fort ``grans`` passeras.
+
+        Returnerar hela body:n (bytes) om den ryms, annars ``None`` (→ 413). Till skillnad
+        från ``await request.body()`` buffrar vi aldrig en obegränsad body i minnet: vi räknar
+        bytes allteftersom chunkarna kommer och släpper så snart summan överskrider gränsen.
+        Detta gäller oavsett Content-Length (chunked/ingen CL/ljugande CL hanteras lika)."""
+        total = 0
+        delar: list[bytes] = []
+        async for chunk in request.stream():
+            total += len(chunk)
+            if total > grans:
+                return None
+            delar.append(chunk)
+        return b"".join(delar)
+
+    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911 — grind-klausuler
         # DNS-rebinding-skydd (0004 §4): avvisa Host som inte är en förväntad loopback-adress.
         # En rebindad angripar-hostname blir äkta same-origin → bara Host-allowlist stoppar den.
         if self.tillaten_host is not None and \
@@ -179,15 +215,48 @@ class GuardProxy:
             return JSONResponse(status_code=404,
                                 content={"serrier": "okänd upstream", "nyckel": nyckel})
 
-        # Resursgräns: avvisa för stora bodies FÖRE vi läser/inspekterar (DoS-skydd).
+        # Resursgräns (C): avvisa för stora bodies FÖRE vi buffrar hela i minnet (DoS-skydd).
+        # Content-Length är en snabb precheck men får INTE lita på: chunked utan CL, eller en
+        # ljugande CL, kringgår den. Därför läser vi strömmen med en löpande byte-räknare och
+        # avbryter i samma stund gränsen passeras — vi buffrar aldrig mer än gränsen + en chunk.
         cl = request.headers.get("content-length", "")
         if cl.isdigit() and int(cl) > self.max_body:
             return JSONResponse(status_code=413, content={"serrier": "body för stor"})
-        body = await request.body()
-        if len(body) > self.max_body:
+        body = await self._las_begransad(request, self.max_body)
+        if body is None:
             return JSONResponse(status_code=413, content={"serrier": "body för stor"})
-        text = body.decode("utf-8", "replace")
         policy, mode = self._policy_och_mode()
+
+        # D — query-string-inspektion. Hemligheter smugglas ibland i URL:en (?key=sk-…),
+        # inte bara i body:n. unquote() avkodar %-escaping så vi ser den riktiga texten.
+        # Känsligt i query → block (vi kan inte "redakta" en URL utan att bryta anropet).
+        if request.url.query:
+            q = inspect(unquote(request.url.query), failure_mode=mode, policy=policy)
+            if handling_for(q.action) is ProxyHandling.block:
+                self._logga(upstream.bas, "block(query)", q, 0)
+                return self._block_svar(q, "känsligt innehåll i query-string stoppat")
+
+        # E — kodad/komprimerad body (gzip/deflate/br/…). Vi kan INTE inspektera innehållet
+        # utan att först dekomprimera; att skicka det som "inspekterat-säkert" vore en lögn.
+        # → analysis_status = UNKNOWN och fel-läget avgör (strict/balanced → block,
+        # permissive → vidarebefordra OFÖRÄNDRAT men loggat som unknown, aldrig redact).
+        ce = request.headers.get("content-encoding", "").strip().lower()
+        if ce and ce != "identity":
+            verdict = besluta([], analysis_status=AnalysisStatus.unknown,
+                              failure_mode=mode, policy=policy)
+            decision = GuardDecision(action=verdict.action,
+                                     analysis_status=AnalysisStatus.unknown,
+                                     failure_mode=verdict.failure_mode, safe_text="",
+                                     reasons=verdict.reasons)
+            if handling_for(decision.action) is ProxyHandling.block:
+                self._logga(upstream.bas, "block(kodad-body-unknown)", decision, 0)
+                return self._block_svar(
+                    decision, f"kodad body ({ce}) kunde ej inspekteras → block")
+            # permissive: forwarda den ORÖRDA kodade body:n (redact vore omöjlig på bytes).
+            return await self._forwarda(request, upstream, body, decision,
+                                        "forward(kodad-body-unknown)")
+
+        text = body.decode("utf-8", "replace")
         decision = inspect(text, failure_mode=mode, policy=policy)
         handling = handling_for(decision.action)
 
@@ -206,6 +275,12 @@ class GuardProxy:
                 return self._block_svar(decision, "kunde ej sanera body säkert → block")
             skickad_body = sanerad
 
+        return await self._forwarda(request, upstream, skickad_body, decision, handling.value)
+
+    async def _forwarda(self, request: Request, upstream: Upstream, skickad_body: bytes,
+                        decision: GuardDecision, logg_etikett: str) -> Response:
+        """Vidarebefordra en redan beslutad request till upstream med SSRF-pinning + strömmat
+        svar. Delas av den vanliga vägen och E-vägen (kodad body, forwardad orörd i permissive)."""
         delar = urlsplit(upstream.bas)
         host = delar.hostname or ""
         if self.validera_ip:
@@ -241,7 +316,7 @@ class GuardProxy:
             return JSONResponse(status_code=502,
                                 content={"serrier": "upstream-fel", "detalj": type(e).__name__})
 
-        self._logga(upstream.bas, handling.value, decision, len(skickad_body))
+        self._logga(upstream.bas, logg_etikett, decision, len(skickad_body))
         ut_headers = {k: v for k, v in svar.headers.items()
                       if k.lower() not in _SLOPPA_HEADERS}
 
@@ -281,9 +356,19 @@ def main() -> None:
     Env: SERRIER_PROXY_PORT (8787), SERRIER_PROXY_FAILURE_MODE (balanced), SERRIER_PROXY_TOKEN."""
     port = int(os.environ.get("SERRIER_PROXY_PORT", "8787"))
     mode = FailureMode(os.environ.get("SERRIER_PROXY_FAILURE_MODE", "balanced"))
-    token = os.environ.get("SERRIER_PROXY_TOKEN") or secrets.token_urlsafe(24)
+    fran_env = os.environ.get("SERRIER_PROXY_TOKEN")
+    token = fran_env or secrets.token_urlsafe(24)
     proxy = GuardProxy(klient=skapa_klient(), failure_mode=mode, token=token)
-    print(f"serrier proxy: loopback 127.0.0.1:{port} — X-Serrier-Token: {token}")
+    # G: token hamnar ALDRIG i stdout/loggar. Satte användaren den själv (env) vet hen den
+    # redan; annars skriver vi den till en 0600-fil och skriver bara ut SÖKVÄGEN.
+    if fran_env:
+        print(f"serrier proxy: loopback 127.0.0.1:{port} — token läst ur SERRIER_PROXY_TOKEN")
+    else:
+        tokenfil = Path(os.environ.get("SERRIER_PROXY_TOKEN_FILE",
+                                       str(Path.home() / ".serrier" / "proxy-token")))
+        skriv_token(token, tokenfil)
+        print(f"serrier proxy: loopback 127.0.0.1:{port} — token i {tokenfil} (0600, läs den "
+              "och skicka som X-Serrier-Token)")
     uvicorn.run(proxy.app(), host="127.0.0.1", port=port)   # loopback-only, låst beslut
 
 
