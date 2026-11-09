@@ -199,15 +199,46 @@ class GuardProxy:
             delar.append(chunk)
         return b"".join(delar)
 
-    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911 — grind-klausuler
-        # DNS-rebinding-skydd (0004 §4): avvisa Host som inte är en förväntad loopback-adress.
-        # En rebindad angripar-hostname blir äkta same-origin → bara Host-allowlist stoppar den.
+    def _vakt(self, request: Request) -> Response | None:
+        """Delad loopback-vakt (0004 §4): Host-allowlist mot DNS-rebinding + token-auth.
+        Returnerar ett felsvar om något brister, annars None (fortsätt). Delas av
+        proxy-vägen (_hantera) och inspektions-endpointen (_inspektera)."""
         if self.tillaten_host is not None and \
                 request.headers.get("host", "").lower() not in self.tillaten_host:
             return JSONResponse(status_code=403, content={"serrier": "otillåten Host"})
         if not self._auktoriserad(request):
             return JSONResponse(status_code=401,
                                 content={"serrier": "ogiltig eller saknad proxy-token"})
+        return None
+
+    async def _inspektera(self, request: Request) -> Response:
+        """0005 steg 1 — ren inspektions-endpoint för browser-extensionen (PEP:en i browsern).
+
+        Tar godtycklig text i body:n, kör SAMMA beslutskärna som proxyn (`inspect`), och
+        returnerar ett GuardDecision som JSON. Den FORWARDAR ingenting och verkställer inget —
+        extensionen är PEP:en som agerar på verdiktet (block/redact/warn/allow). Svaret bär
+        bara redakterad data (findings = first4…last4, safe_text = maskerad); rå text lämnar
+        aldrig den här funktionen och loggas aldrig. Skyddad av samma Host-allowlist + token."""
+        fel = self._vakt(request)
+        if fel is not None:
+            return fel
+        body = await self._las_begransad(request, self.max_body)
+        if body is None:
+            return JSONResponse(status_code=413, content={"serrier": "text för stor"})
+        text = body.decode("utf-8", "replace")
+        policy, mode = self._policy_och_mode()
+        decision = inspect(text, failure_mode=mode, policy=policy)
+        self._logga("(extension)", f"inspect:{handling_for(decision.action).value}", decision, 0)
+        svar = decision.som_dict()
+        svar["handling"] = handling_for(decision.action).value   # block | redact | forward(=allow)
+        return JSONResponse(svar)
+
+    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911 — grind-klausuler
+        # DNS-rebinding-skydd (0004 §4): avvisa Host som inte är en förväntad loopback-adress.
+        # En rebindad angripar-hostname blir äkta same-origin → bara Host-allowlist stoppar den.
+        fel = self._vakt(request)
+        if fel is not None:
+            return fel
 
         nyckel = request.path_params["nyckel"]
         upstream = self._upstream(nyckel)
@@ -333,8 +364,12 @@ class GuardProxy:
 
     def app(self) -> Starlette:
         metoder = ["GET", "POST", "PUT", "DELETE", "PATCH"]
-        # Path-token-rutter FÖRST (för CLI-injektion via base_url); sedan header-token-rutter.
+        # Inspektions-endpointen (0005) FÖRST — annars skulle "/inspect" matcha /{nyckel}.
+        # Path-token-variant för symmetri med proxyn; header-token (X-Serrier-Token) räcker.
+        # Path-token-rutter sedan (CLI-injektion via base_url); sist header-token-rutter.
         return Starlette(routes=[
+            Route("/inspect", self._inspektera, methods=["POST"]),
+            Route("/t/{token}/inspect", self._inspektera, methods=["POST"]),
             Route("/t/{token}/{nyckel}", self._hantera, methods=metoder),
             Route("/t/{token}/{nyckel}/{rest:path}", self._hantera, methods=metoder),
             Route("/{nyckel}", self._hantera, methods=metoder),
