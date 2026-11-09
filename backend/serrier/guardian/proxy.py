@@ -11,12 +11,15 @@ omskrivning annars BLOCK · leak-through = 0. Extra skydd: SSRF/privata IP/DNS-r
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import json
 import os
+import secrets
 import socket
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from typing import TYPE_CHECKING
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 import uvicorn
@@ -28,6 +31,11 @@ from starlette.routing import Route
 from serrier.guardian.enforcement import EnforcementLevel, ProxyHandling, handling_for
 from serrier.guardian.inspect import GuardDecision, inspect
 from serrier.guardian.policy import STANDARD, FailureMode, Policy
+
+if TYPE_CHECKING:
+    from serrier.db.store import Store
+
+_TOKEN_HEADER = "x-serrier-token"  # noqa: S105 — header-namn, inte en hemlighet
 
 
 @dataclass(frozen=True)
@@ -48,24 +56,27 @@ _SLOPPA_HEADERS = {"host", "content-length", "connection", "proxy-connection",
                    "keep-alive", "transfer-encoding", "te", "trailer", "upgrade"}
 
 
-def losa_och_validera(host: str) -> bool:
-    """SSRF/DNS-rebinding-skydd: upstream måste resolva till ENBART globala (publika) IP.
-    Privata/loopback/link-local/reserverade → avvisa. Resolvfel → avvisa (fail-closed)."""
+def validerad_ip(host: str) -> str | None:
+    """SSRF/DNS-rebinding-skydd + TOCTOU-fix: resolva EN gång, kräv att ALLA adresser är
+    globala (publika), och returnera den validerade IP:n att PINNA anslutningen till. Någon
+    icke-global adress (privat/loopback/link-local/reserverad) → None (avvisa hela). Resolv-
+    fel → None (fail-closed). Anroparen ansluter sedan till denna IP med SNI/Host = host, så
+    ingen andra-resolution kan rebind:a till en intern adress mellan kontroll och anslutning."""
     try:
         infon = socket.getaddrinfo(host, None)
     except (OSError, UnicodeError):
-        return False
-    adresser = {info[4][0] for info in infon}
+        return None
+    adresser = [info[4][0].split("%")[0] for info in infon]   # strippa ev. zon-id
     if not adresser:
-        return False
+        return None
     for a in adresser:
         try:
-            ip = ipaddress.ip_address(a.split("%")[0])     # strippa ev. zon-id
+            ip = ipaddress.ip_address(a)
         except ValueError:
-            return False
+            return None
         if not ip.is_global:
-            return False
-    return True
+            return None
+    return adresser[0]                                     # pinna första validerade adressen
 
 
 def _sanera_json(body: bytes, decision: GuardDecision) -> bytes | None:
@@ -90,6 +101,10 @@ class GuardProxy:
     failure_mode: FailureMode = FailureMode.balanced
     policy: Policy = STANDARD
     validera_ip: bool = True
+    token: str | None = None                   # krävs i X-Serrier-Token om satt (loopback-auth)
+    store: Store | None = None                 # satt → policy hämtas per org
+    org_id: str | None = None
+    max_body: int = 10_000_000                 # 10 MB — resursgräns (avvisa innan inspektion)
     audit: list[dict] = field(default_factory=list)
 
     namn: str = "local-proxy"
@@ -101,6 +116,19 @@ class GuardProxy:
 
     def _upstream(self, nyckel: str) -> Upstream | None:
         return next((u for u in self.allowlist if u.nyckel == nyckel), None)
+
+    def _auktoriserad(self, request: Request) -> bool:
+        """Loopback-auth: andra lokala processer får inte använda proxyn. Token saknas i
+        konfig → öppet (dev). Jämförelse i konstant tid."""
+        if self.token is None:
+            return True
+        return hmac.compare_digest(request.headers.get(_TOKEN_HEADER, ""), self.token)
+
+    def _policy_och_mode(self) -> tuple[Policy, FailureMode]:
+        """Per-org-policy om en store+org kopplats, annars proxyns default."""
+        if self.store is not None and self.org_id is not None:
+            return self.store.hamta_guard_policy(self.org_id)
+        return self.policy, self.failure_mode
 
     def _logga(self, upstream: str, handling: str, d: GuardDecision, bytes_fram: int) -> None:
         # ALDRIG rå body — bara verdikt + redakterade findings (findings bär first4…last4).
@@ -117,16 +145,27 @@ class GuardProxy:
             "analysis_status": d.analysis_status.value,
             "reasons": [r.forklaring for r in d.reasons]})
 
-    async def _hantera(self, request: Request) -> Response:
+    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911 — grind-klausuler
+        if not self._auktoriserad(request):
+            return JSONResponse(status_code=401,
+                                content={"serrier": "ogiltig eller saknad proxy-token"})
+
         nyckel = request.path_params["nyckel"]
         upstream = self._upstream(nyckel)
         if upstream is None:
             return JSONResponse(status_code=404,
                                 content={"serrier": "okänd upstream", "nyckel": nyckel})
 
+        # Resursgräns: avvisa för stora bodies FÖRE vi läser/inspekterar (DoS-skydd).
+        cl = request.headers.get("content-length", "")
+        if cl.isdigit() and int(cl) > self.max_body:
+            return JSONResponse(status_code=413, content={"serrier": "body för stor"})
         body = await request.body()
+        if len(body) > self.max_body:
+            return JSONResponse(status_code=413, content={"serrier": "body för stor"})
         text = body.decode("utf-8", "replace")
-        decision = inspect(text, failure_mode=self.failure_mode, policy=self.policy)
+        policy, mode = self._policy_och_mode()
+        decision = inspect(text, failure_mode=mode, policy=policy)
         handling = handling_for(decision.action)
 
         # UNKNOWN får aldrig tyst bli forward i strict/balanced — handling_for ger redan
@@ -144,20 +183,31 @@ class GuardProxy:
                 return self._block_svar(decision, "kunde ej sanera body säkert → block")
             skickad_body = sanerad
 
-        host = urlsplit(upstream.bas).hostname or ""
-        if self.validera_ip and not losa_och_validera(host):
-            self._logga(upstream.bas, "block(ssrf)", decision, 0)
-            return JSONResponse(status_code=502, content={
-                "serrier": "upstream avvisad", "detalj": "resolvar till icke-global adress"})
+        delar = urlsplit(upstream.bas)
+        host = delar.hostname or ""
+        if self.validera_ip:
+            ip = validerad_ip(host)
+            if ip is None:
+                self._logga(upstream.bas, "block(ssrf)", decision, 0)
+                return JSONResponse(status_code=502, content={
+                    "serrier": "upstream avvisad", "detalj": "resolvar till icke-global adress"})
+            # Pinna anslutningen till den validerade IP:n (TOCTOU-fix); SNI/Host = host.
+            netloc_ip = f"{ip}:{delar.port}" if delar.port else ip
+            url = urlunsplit((delar.scheme, netloc_ip, "/" + request.path_params.get("rest", ""),
+                              request.url.query, ""))
+            extensions = {"sni_hostname": host}
+        else:
+            url = upstream.bas.rstrip("/") + "/" + request.path_params.get("rest", "")
+            if request.url.query:
+                url += "?" + request.url.query
+            extensions = {}
 
-        url = upstream.bas.rstrip("/") + "/" + request.path_params.get("rest", "")
-        if request.url.query:
-            url += "?" + request.url.query
         vidare_headers = {k: v for k, v in request.headers.items()
                           if k.lower() not in _SLOPPA_HEADERS}
+        vidare_headers["host"] = delar.netloc                 # korrekt Host trots pinnad IP
         try:
             svar = await self.klient.request(request.method, url, headers=vidare_headers,
-                                             content=skickad_body)
+                                             content=skickad_body, extensions=extensions)
         except httpx.HTTPError as e:
             # Nätfel vid vidarebefordran → fail-closed (skicka aldrig vidare blint).
             self._logga(upstream.bas, "block(upstream-fel)", decision, 0)
@@ -180,17 +230,21 @@ class GuardProxy:
 
 def skapa_klient() -> httpx.AsyncClient:
     """Prod-klient: full TLS-verifiering, INGA redirects (redirect till intern host = SSRF),
-    rimlig timeout. Används när proxyn körs skarpt mot riktiga upstreams."""
-    return httpx.AsyncClient(verify=True, follow_redirects=False, timeout=30.0)
+    rimlig timeout, och trust_env=False så en ambient HTTPS_PROXY/NO_PROXY i miljön INTE
+    kapar Serriers egen vidarebefordran. Resursgräns på body-storlek görs i handlern."""
+    return httpx.AsyncClient(verify=True, follow_redirects=False, timeout=30.0, trust_env=False)
 
 
 def main() -> None:
-    """Kör proxyn skarpt på LOOPBACK (127.0.0.1, aldrig 0.0.0.0) med default-allowlisten.
-    Klient: base_url = http://127.0.0.1:<port>/<anthropic|openai|gemini>.
-    Env: SERRIER_PROXY_PORT (8787), SERRIER_PROXY_FAILURE_MODE (balanced)."""
+    """Kör proxyn skarpt på LOOPBACK (127.0.0.1, aldrig 0.0.0.0) med default-allowlisten och
+    en PÅTVINGAD token (loopback-auth) som skrivs ut en gång. Klienten måste skicka den som
+    X-Serrier-Token. Klient: base_url = http://127.0.0.1:<port>/<anthropic|openai|gemini>.
+    Env: SERRIER_PROXY_PORT (8787), SERRIER_PROXY_FAILURE_MODE (balanced), SERRIER_PROXY_TOKEN."""
     port = int(os.environ.get("SERRIER_PROXY_PORT", "8787"))
     mode = FailureMode(os.environ.get("SERRIER_PROXY_FAILURE_MODE", "balanced"))
-    proxy = GuardProxy(klient=skapa_klient(), failure_mode=mode)
+    token = os.environ.get("SERRIER_PROXY_TOKEN") or secrets.token_urlsafe(24)
+    proxy = GuardProxy(klient=skapa_klient(), failure_mode=mode, token=token)
+    print(f"serrier proxy: loopback 127.0.0.1:{port} — X-Serrier-Token: {token}")
     uvicorn.run(proxy.app(), host="127.0.0.1", port=port)   # loopback-only, låst beslut
 
 

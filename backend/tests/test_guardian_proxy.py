@@ -12,9 +12,10 @@ from starlette.testclient import TestClient
 from upstream_harness import KontrolleradUpstream
 
 import serrier.guardian.inspect as im
+from serrier.db.store import Store
 from serrier.guardian.enforcement import EnforcementAdapter, EnforcementLevel
-from serrier.guardian.policy import FailureMode
-from serrier.guardian.proxy import GuardProxy, Upstream, losa_och_validera
+from serrier.guardian.policy import FailureMode, policy_fran_dict
+from serrier.guardian.proxy import GuardProxy, Upstream, validerad_ip
 
 RA = "sk-ant-api03-REALSECRET1234567890abcDEF"
 KORT = "4111 1111 1111 1111"
@@ -27,28 +28,28 @@ def _publik_dns(monkeypatch, ip: str = "93.184.216.34") -> None:
                         lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 0))])
 
 
-def _rigga(monkeypatch, *, failure_mode=FailureMode.balanced, validera_ip=True):
+def _rigga(monkeypatch, *, failure_mode=FailureMode.balanced, validera_ip=True, **kw):
     up = KontrolleradUpstream()
     klient = httpx.AsyncClient(transport=httpx.ASGITransport(app=up.app()))
     px = GuardProxy(klient=klient, allowlist=ALLOW, failure_mode=failure_mode,
-                    validera_ip=validera_ip)
+                    validera_ip=validera_ip, **kw)
     return up, TestClient(px.app()), px
 
 
-# --- SSRF-guard som riktig enhet ------------------------------------------
+# --- SSRF-guard som riktig enhet (pinnar validerad IP, TOCTOU-fix) --------
 def test_ssrf_guard_avvisar_privat_och_loopback() -> None:
-    assert losa_och_validera("localhost") is False        # → 127.0.0.1 (privat)
-    assert losa_och_validera("nonexistent.invalid.") is False   # resolvfel → fail-closed
+    assert validerad_ip("localhost") is None              # → 127.0.0.1 (privat)
+    assert validerad_ip("nonexistent.invalid.") is None   # resolvfel → fail-closed
 
 
-def test_ssrf_guard_slapper_global(monkeypatch) -> None:
+def test_ssrf_guard_slapper_global_och_pinnar_ip(monkeypatch) -> None:
     _publik_dns(monkeypatch)
-    assert losa_och_validera("upstream.test") is True
+    assert validerad_ip("upstream.test") == "93.184.216.34"   # returnerar IP att pinna
 
 
 def test_ssrf_guard_avvisar_dns_rebinding_till_privat(monkeypatch) -> None:
     _publik_dns(monkeypatch, ip="10.0.0.5")               # allowlistad host → privat IP
-    assert losa_och_validera("upstream.test") is False
+    assert validerad_ip("upstream.test") is None
 
 
 # --- prevention: leak-through = 0 -----------------------------------------
@@ -137,6 +138,49 @@ def test_leakthrough_noll_over_batteri(monkeypatch) -> None:
     assert all(s in (403,) for s in svar), svar      # alla blockerade
     assert up.antal_bytes == 0                        # LEAK-THROUGH = 0 över hela batteriet
     assert len(up.mottaget) == 0
+
+
+# --- härdning (P0/P1) ------------------------------------------------------
+def test_loopback_auth_token_kravs(monkeypatch) -> None:
+    _publik_dns(monkeypatch)
+    up, c, _ = _rigga(monkeypatch, token="hemlig-token")
+    # utan token → 401, inget vidarebefordrat
+    r = c.post("/test/v1/messages", content=b'{"msg":"ren"}')
+    assert r.status_code == 401
+    assert up.antal_bytes == 0
+    # fel token → 401
+    assert c.post("/test/v1/messages", content=b'{"msg":"ren"}',
+                  headers={"X-Serrier-Token": "fel"}).status_code == 401
+    # rätt token → igenom
+    r = c.post("/test/v1/messages", content=b'{"msg":"ren"}',
+               headers={"X-Serrier-Token": "hemlig-token"})
+    assert r.status_code == 200
+    assert up.antal_bytes > 0
+
+
+def test_policy_koppling_till_org(monkeypatch) -> None:
+    _publik_dns(monkeypatch)
+    store = Store("sqlite:///:memory:")
+    org = store.skapa_org("t")
+    up = KontrolleradUpstream()
+    klient = httpx.AsyncClient(transport=httpx.ASGITransport(app=up.app()))
+    px = GuardProxy(klient=klient, allowlist=ALLOW, store=store, org_id=org)
+    c = TestClient(px.app())
+    body = f'{{"msg":"kort {KORT}"}}'.encode()
+    # default org-policy: kort (high) → redact → forward sanerat
+    assert c.post("/test/v1/messages", content=body).status_code == 200
+    assert up.innehaller(KORT.encode()) is False
+    # skärp org-policyn: high → block
+    store.satt_guard_policy(org, policy_fran_dict({"high": "block"}), FailureMode.balanced)
+    assert c.post("/test/v1/messages", content=body).status_code == 403   # nu blockerat
+
+
+def test_body_for_stor_avvisas(monkeypatch) -> None:
+    _publik_dns(monkeypatch)
+    up, c, _ = _rigga(monkeypatch, max_body=100)
+    r = c.post("/test/v1/messages", content=b"x" * 500)
+    assert r.status_code == 413
+    assert up.antal_bytes == 0                             # inspekterades/forwardades aldrig
 
 
 # --- kontrakt --------------------------------------------------------------
