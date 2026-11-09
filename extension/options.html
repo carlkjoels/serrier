@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <title>Serrier Pre-Send Guardian — inställningar</title>
+  <style>
+    body { font: 14px system-ui; max-width: 520px; margin: 24px auto; color: #222; }
+    label { display: block; margin: 14px 0 4px; font-weight: 600; }
+    input, select { width: 100%; padding: 6px 8px; box-sizing: border-box; }
+    .hint { color: #666; font-size: 12px; margin-top: 4px; }
+    button { margin-top: 18px; padding: 8px 14px; }
+    code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
+    .ok { color: #0a7d2c; } .err { color: #b00020; }
+  </style>
+</head>
+<body>
+  <h2>Serrier Pre-Send Guardian <small style="color:#888">(scaffold)</small></h2>
+  <p>Extensionen frågar din <b>lokala</b> Serrier-daemon innan text skickas till en stödd
+     AI-sajt. Inget lämnar datorn utom till <code>127.0.0.1</code>.</p>
+
+  <label for="port">Daemon-port</label>
+  <input id="port" type="number" min="1" max="65535" />
+  <div class="hint">Standard: 8788 (daemonens loopback-port).</div>
+
+  <label for="token">Proxy-token</label>
+  <input id="token" type="password" placeholder="klistra in innehållet i ~/.serrier/proxy-token" />
+  <div class="hint">Hämta den med <code>cat ~/.serrier/proxy-token</code> (0600-fil). Lagras lokalt i browsern.</div>
+
+  <label for="failMode">Fel-läge (speglar daemonens policy)</label>
+  <select id="failMode">
+    <option value="strict">strict — blockera vid osäkerhet</option>
+    <option value="balanced">balanced — kräv bekräftelse vid okänt</option>
+    <option value="permissive">permissive — tillåt men markera</option>
+  </select>
+
+  <label><input id="failClosed" type="checkbox" style="width:auto" /> Fail-closed när daemonen inte svarar</label>
+  <div class="hint">På = blockera om daemonen är nere. Av = varna och låt dig skicka ändå. UNKNOWN är aldrig "säkert".</div>
+
+  <div><button id="spara">Spara</button> <span id="status"></span></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

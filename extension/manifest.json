@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Serrier Pre-Send Guardian (scaffold)",
+  "version": "0.0.1",
+  "description": "Checks what you type into supported AI chat boxes against your LOCAL Serrier daemon before it is sent. Scaffold — not published.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://claude.ai/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Serrier Pre-Send Guardian"
+  }
+}
