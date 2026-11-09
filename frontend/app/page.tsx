@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import {
   Bar,
@@ -113,11 +114,16 @@ export default function Dashboard() {
 
   return (
     <main className="mx-auto max-w-5xl p-8">
-      <header className="mb-8 border-b-2 border-neutral-900 pb-3">
-        <h1 className="text-2xl font-bold">Serrier</h1>
-        <p className="text-sm text-neutral-500">
-          Security intelligence for the AI-native era
-        </p>
+      <header className="mb-8 flex items-end justify-between border-b-2 border-neutral-900 pb-3">
+        <div>
+          <h1 className="text-2xl font-bold">Serrier</h1>
+          <p className="text-sm text-neutral-500">
+            Security intelligence for the AI-native era
+          </p>
+        </div>
+        <Link href="/guard" className="text-sm underline">
+          Pre-Send Guardian →
+        </Link>
       </header>
 
       <form
