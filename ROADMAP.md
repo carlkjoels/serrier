@@ -85,7 +85,10 @@ is Detection ≠ Decision ≠ Enforcement; UNKNOWN is a first-class state (never
   rewrite else BLOCK. **Verified vs controlled upstream: leak-through = 0.** `EnforcementAdapter`
   contract so browser-ext / Claude Code / IDE attach later. Design + gating artifacts:
   [`docs/design/0002-guardian-proxy-adapter.md`](docs/design/0002-guardian-proxy-adapter.md).
-  CLI wrapper (model C) still to come. **Transparent TLS MITM rejected.**
+  Hardened: DNS-TOCTOU pinned IP, loopback token-auth, per-org policy, body limit, verified
+  over **real TCP**. **Model C CLI wrapper built** (`serrier-guard run -- <cmd>`): in-process
+  proxy, token via base_url path, fail-closed, verified with the **real Anthropic SDK**.
+  **Transparent TLS MITM rejected.** Streaming (SSE) unsupported in v1.
 
 ## Target picture (NOT a backlog — a direction)
 The strategic vision (Secure AI Adoption Infrastructure: policy/model gateway, agent

@@ -19,6 +19,28 @@ resolved (§9). Builds on [0001](0001-pre-send-guardian.md). Baseline `v0.1.0`.
 - **Verified over real TCP:** block stops bytes on the wire, clean is byte-identical, plus
   ~1 MB body, chunked transfer, unexpected headers, redirect-never-followed, env-proxy ignored.
 
+### Model C — CLI wrapper built (2026-11-09)
+`serrier run -- <cmd>` (`serrier-guard` console script) starts the proxy in-process on a
+loopback port, generates a token in memory and injects it via the child's base_url **path**
+(`/t/<token>/…`) — so it never appears in a process list (argv) or logs — sets
+`ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL`/… + `NO_PROXY=127.0.0.1` (child loopback can't be
+hijacked by an ambient `HTTPS_PROXY`), preserves other env, forwards signals, supports
+timeout/cleanup, and is **fail-closed** per failure mode if the proxy can't start. Verified
+with the **real Anthropic SDK** (dummy key, controlled upstream): clean parses, a secret →
+403 with the upstream unchanged (leak-through = 0 through the real SDK). Covered/bypass paths
+are documented in the module docstring; no false guarantees of process isolation.
+
+### Streaming & compatibility limitations (v1)
+- **Streaming responses (SSE / `stream=True`) are NOT supported.** The proxy buffers the
+  upstream response (`svar.content`) before returning, so a streamed response is not relayed
+  incrementally and a streaming client will break or lose streaming. Request-side prevention
+  only; streaming support is future work.
+- Request bodies are **buffered** (needed for inspection) up to `max_body` (10 MB) → very
+  large or truly streamed request bodies are capped.
+- REDACT rewriting is **JSON-only**; other content types degrade to BLOCK.
+- Only base_url-respecting clients are covered; a tool that hardcodes a direct connection or
+  ignores env bypasses the proxy (a coverage limit, not a bug).
+
 ### Honest caveats (unchanged truths)
 - Real-TCP byte-identity is proven for the tested cases/conditions — not for every payload
   shape or network condition. Leak-through = 0 is verified for the **blocked test cases**,

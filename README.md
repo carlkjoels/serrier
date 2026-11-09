@@ -62,6 +62,26 @@ docker compose up --build     # db + backend (migrated) + frontend
 
 **Migrations:** `cd backend && SERRIER_DB_URL=... uv run alembic upgrade head`.
 
+## Pre-Send Guardian — prevention (stop exposure *before* it's sent)
+
+Inspect outbound AI-API traffic locally and **block/redact secrets & PII before they reach
+the provider**. Wrap any AI client so its traffic routes through a local loopback proxy:
+
+```bash
+serrier-guard run -- claude
+serrier-guard run -- python my_ai_client.py
+```
+
+The wrapper starts the Guardian proxy on loopback, injects a one-time token via the child's
+`ANTHROPIC_BASE_URL`/`OPENAI_BASE_URL` (never in a process list), and enforces the policy:
+secrets → **block**, cards/PII → **redact** (safe JSON rewrite, else block), clean → forward.
+Detection is **local and deterministic** — the raw text never leaves your machine.
+
+**Honest coverage:** only clients that respect `*_BASE_URL` and actually route through the
+proxy are protected; a tool that hardcodes a direct connection bypasses it. **No transparent
+MITM.** **Streaming responses (SSE / `stream=True`) are not supported in v1** (the proxy
+buffers responses). Design + threat model: [`docs/design/0002-guardian-proxy-adapter.md`](docs/design/0002-guardian-proxy-adapter.md).
+
 ## MVP scope (locked small, on purpose)
 
 **Local AI Development Security + Security Analytics + evidence-backed Remediation.**
