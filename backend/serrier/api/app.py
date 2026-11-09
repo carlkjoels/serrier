@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from serrier import analyst, analytics, correlation, export, remediation
@@ -51,6 +52,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Serrier", version="0.0.1", lifespan=lifespan)
+
+# CORS: dashboarden (localhost:3000) hämtar från API:t (localhost:8000) — cross-origin.
+# SNÄV allowlist (inga wildcards), konfigurerbar; krävs för att dashboarden ska kunna läsa.
+_CORS_ORIGINS = [o.strip() for o in os.environ.get(
+    "SERRIER_CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",") if o.strip()]
+app.add_middleware(CORSMiddleware, allow_origins=_CORS_ORIGINS,
+                   allow_methods=["GET", "POST", "PUT", "OPTIONS"],
+                   allow_headers=["*"])
 
 
 # --- auth -----------------------------------------------------------------
