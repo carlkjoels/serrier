@@ -41,6 +41,16 @@ def get_store() -> Store:                      # lat singleton; överskrivs i te
 StoreDep = Annotated[Store, Depends(get_store)]
 
 
+def krav_sakra_konfig(env: dict) -> None:
+    """Vägra en osäker produktionsstart (F1). Anropas från entrypoint FÖRE uvicorn: om
+    auth krävs måste minst en owner-nyckel seedas (ingen öppen /orgs-bootstrap i auth-läge),
+    annars vore en nätverksexponerad instans administrativt öppen tills första anropet."""
+    if env.get("SERRIER_REQUIRE_AUTH") and not (env.get("SERRIER_API_KEYS") or "").strip():
+        raise RuntimeError(
+            "SERRIER_REQUIRE_AUTH är satt men SERRIER_API_KEYS är tomt — vägrar starta. "
+            "Seeda minst en owner-nyckel; öppen bootstrap är avstängd i auth-läge.")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # Seed owner-nycklar från env vid start (prod/compose). Osatt → inget byggs (test).
@@ -261,8 +271,13 @@ class SkapaNyckel(BaseModel):
 
 @app.post("/orgs")
 def skapa_org(b: SkapaOrg, store: StoreDep) -> dict:
-    """Bootstrappa en org + dess första owner-nyckel. Öppen bara i dev-läge (ingen auth
-    konfigurerad); när nycklar finns krävs en owner-nyckel för att skapa fler orgar."""
+    """Bootstrappa en org + dess första owner-nyckel. Öppen BARA i dev-läge. I auth-läge
+    (SERRIER_REQUIRE_AUTH) är den öppna bootstrappen avstängd — orgar seedas via
+    SERRIER_API_KEYS eller skapas av en befintlig owner (F1)."""
+    if os.environ.get("SERRIER_REQUIRE_AUTH"):
+        raise HTTPException(
+            status_code=403,
+            detail="öppen bootstrap avstängd i auth-läge; seeda via SERRIER_API_KEYS")
     if store.antal_nycklar() > 0:
         raise HTTPException(status_code=403, detail="orgskapande kräver owner-nyckel i prod")
     org_id = store.skapa_org(b.namn)

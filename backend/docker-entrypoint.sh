@@ -3,6 +3,10 @@
 # Vänta in Postgres om vi pekar på en (compose startar dem parallellt).
 set -e
 
+# F1: vägra starta osäkert (t.ex. auth krävs men ingen nyckel seedad).
+echo "serrier: validerar konfiguration…"
+uv run python -c "import os; from serrier.api.app import krav_sakra_konfig; krav_sakra_konfig(os.environ)"
+
 case "$SERRIER_DB_URL" in
   postgresql*|postgres*)
     echo "serrier: väntar på databasen…"
