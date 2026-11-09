@@ -18,6 +18,8 @@ dependencies = [
 postgres = ["psycopg[binary]>=3.2"]
 
 [project.scripts]
+# Enhetlig CLI: `serrier up|down|status | run -- <cmd> | scan <path>`
+serrier = "serrier.cli_main:main"
 # CLI-wrapper (model C): `serrier-guard run -- <kommando>`
 serrier-guard = "serrier.guardian.run:main"
 # Lokal skanning utan server: `serrier-scan <sökväg>`

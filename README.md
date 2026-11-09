@@ -71,7 +71,20 @@ docker compose up --build     # db + backend (migrated) + frontend
 ## Pre-Send Guardian — prevention (stop exposure *before* it's sent)
 
 Inspect outbound AI-API traffic locally and **block/redact secrets & PII before they reach
-the provider**. Wrap any AI client so its traffic routes through a local loopback proxy:
+the provider**.
+
+**Always-on (it just acts):** start Serrier once; every AI tool you point at it is protected
+while it runs.
+
+```bash
+serrier up                 # persistent Guardian on loopback (stable token, Host-allowlist)
+source ~/.serrier/env.sh   # points ANTHROPIC_BASE_URL/… at the daemon
+claude                     # …now protected. Decisions show in http://localhost:3000/guard
+serrier status             # running? port?
+serrier down               # stop
+```
+
+**Per-command (wrap one tool):**
 
 ```bash
 serrier-guard run -- claude

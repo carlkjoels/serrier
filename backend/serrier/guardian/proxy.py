@@ -106,6 +106,9 @@ class GuardProxy:
     store: Store | None = None                 # satt → policy hämtas per org
     org_id: str | None = None
     max_body: int = 10_000_000                 # 10 MB — resursgräns (avvisa innan inspektion)
+    # Host-header-allowlist mot DNS-rebinding (0004 §4) — krävs i alltid-på/daemon-läge.
+    # None = ingen kontroll (dev); satt = avvisa Host som inte är en förväntad loopback-adress.
+    tillaten_host: set[str] | None = None
     audit: list[dict] = field(default_factory=list)
 
     namn: str = "local-proxy"
@@ -160,7 +163,12 @@ class GuardProxy:
             "analysis_status": d.analysis_status.value,
             "reasons": [r.forklaring for r in d.reasons]})
 
-    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911 — grind-klausuler
+    async def _hantera(self, request: Request) -> Response:  # noqa: PLR0911, PLR0912 — grind-klausuler
+        # DNS-rebinding-skydd (0004 §4): avvisa Host som inte är en förväntad loopback-adress.
+        # En rebindad angripar-hostname blir äkta same-origin → bara Host-allowlist stoppar den.
+        if self.tillaten_host is not None and \
+                request.headers.get("host", "").lower() not in self.tillaten_host:
+            return JSONResponse(status_code=403, content={"serrier": "otillåten Host"})
         if not self._auktoriserad(request):
             return JSONResponse(status_code=401,
                                 content={"serrier": "ogiltig eller saknad proxy-token"})
