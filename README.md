@@ -23,6 +23,10 @@ export. Backend: 86 tests, ruff-clean. The product never claims "secure".
 - [`THREAT_MODEL.md`](THREAT_MODEL.md) — Serrier processes untrusted input; what can go wrong.
 - [`ROADMAP.md`](ROADMAP.md) — phased plan; the smallest meaningful MVP.
 - [`SECURITY.md`](SECURITY.md) — how Serrier secures *itself* (it follows its own advice).
+- [`docs/security/framework-alignment.md`](docs/security/framework-alignment.md) — mapping to
+  NIST CSF/Zero Trust, OWASP ASVS/LLM Top 10, CISA/ENISA Secure-by-Default, MITRE ATT&CK/ATLAS
+  (**informed-by, not certified**; each row bounded to a tested control).
+- [`docs/security/red-team-brief.md`](docs/security/red-team-brief.md) — external review brief.
 
 ### What exists now
 
