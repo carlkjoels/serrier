@@ -94,6 +94,33 @@ for, plus closing the documented Medium risks (header/binary inspection, real sc
 durable audit). Recommendation tier, explicitly: **Ready for external review** (not "internal
 only", not "not ready").
 
+## A-bis. Post-remediation adversarial self-review (same day)
+
+Before handing PR #1 to external review, an adversarial pass tried to get *around* the A–G
+fixes. It found one real **fail-open** the regression tests missed, now fixed:
+
+- **FYND 1 (fail-open, fixed) — `SERRIER_REQUIRE_AUTH` split-brain.** Three sites read the var
+  differently: `nuvarande_principal` used a raw truthiness check while `krav_sakra_konfig` and
+  `skapa_org` used `_sant()`. With `SERRIER_REQUIRE_AUTH="false"` + no keys, `POST /projects`
+  returned 401 (looked locked) while `POST /orgs` returned 200 and **minted an owner API key to
+  anyone**. Fix: a single shared `_auth_kravs()` helper used by all three sites — falsy now means
+  dev-open *consistently*, truthy locks both. Tests: `test_A_require_auth_tolkas_konsekvent_falsy`,
+  `test_A_require_auth_sant_laser_bade_orgs_och_projects`.
+- **FYND 1b (unusable-config, fixed) — `API_KEYS=","`.** The config gate checked the raw string
+  was non-empty, so `","`/whitespace passed but seeded zero keys → auth-required-but-no-key
+  brick. Fix: `giltiga_nycklar()` counts real keys (same parse as seed). Test:
+  `test_A_konfig_vagrar_nar_api_keys_saknar_giltig_nyckel`.
+- **FYND 2 (guarantee-hardening, fixed) — double-encoded query.** A single `unquote()` let a
+  double-encoded secret (`?q=%2573k-…`) hide. Not a plaintext leak (upstream doesn't double-decode
+  and the key isn't sent there), but it broke the "we see query secrets" guarantee. Fix:
+  `_unquote_fixpunkt()` decodes to a fixpoint (max 5 rounds). Test:
+  `test_D_dubbelkodad_hemlighet_i_query_blockeras`.
+
+The reviewer also **confirmed it could not break** B (traversal/symlink, API+scanner), C
+(streaming limit, lying/missing CL), E (encoding variants), the proxy token/Host-allowlist,
+SSRF/IP-pinning, F (rlimit, semgrep not starved), or G (token 0600, bounded audit, env-only
+key, Dockerfile checksum) — which strengthens the review. Suite now **233 passed**.
+
 ## G. Git state
 
 - **Branch:** `security-hardening` @ `main` (`2ee540c`). **Nothing committed, pushed, or merged.**

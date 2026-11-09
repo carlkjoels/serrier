@@ -99,6 +99,18 @@ def validerad_ip(host: str) -> str | None:
     return adresser[0]                                     # pinna första validerade adressen
 
 
+def _unquote_fixpunkt(s: str, varv: int = 5) -> str:
+    """Avkoda %-escaping tills strängen slutar ändras (max `varv`) — så en DUBBELkodad
+    hemlighet (?key=%2573k-… → %73k-… → sk-…) inte gömmer sig bakom ett enda unquote.
+    Taket undviker oändlig loop; 5 varv räcker för realistiska lager."""
+    for _ in range(varv):
+        n = unquote(s)
+        if n == s:
+            return n
+        s = n
+    return s
+
+
 def _sanera_json(body: bytes, decision: GuardDecision) -> bytes | None:
     """REDACT-and-forward: skriv om body till safe_text OM resultatet fortfarande är giltig
     JSON OCH inga oredakterbara (evasion, -1) träffar finns. Annars None → degradera till
@@ -228,10 +240,10 @@ class GuardProxy:
         policy, mode = self._policy_och_mode()
 
         # D — query-string-inspektion. Hemligheter smugglas ibland i URL:en (?key=sk-…),
-        # inte bara i body:n. unquote() avkodar %-escaping så vi ser den riktiga texten.
-        # Känsligt i query → block (vi kan inte "redakta" en URL utan att bryta anropet).
+        # inte bara i body:n. Avkoda %-escaping till fixpunkt (även DUBBELkodning) så vi ser
+        # den riktiga texten. Känsligt i query → block (kan ej "redakta" en URL utan att bryta).
         if request.url.query:
-            q = inspect(unquote(request.url.query), failure_mode=mode, policy=policy)
+            q = inspect(_unquote_fixpunkt(request.url.query), failure_mode=mode, policy=policy)
             if handling_for(q.action) is ProxyHandling.block:
                 self._logga(upstream.bas, "block(query)", q, 0)
                 return self._block_svar(q, "känsligt innehåll i query-string stoppat")

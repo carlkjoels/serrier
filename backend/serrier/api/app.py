@@ -46,18 +46,36 @@ def _sant(v: str | None) -> bool:
     return (v or "").strip().lower() not in ("", "0", "false", "no", "off")
 
 
+def _auth_kravs(env: dict[str, str] | None = None) -> bool:
+    """EN sanning för "kräver auth?" — delas av startgrinden, auth-beslutet och /orgs-grinden.
+    Tidigare läste de tre ställena SERRIER_REQUIRE_AUTH olika (rått vs `_sant`), så t.ex.
+    "false" kunde betyda 'auth krävs' på ett ställe och 'auth ej krävd' på ett annat → ett
+    split-brain där /orgs öppnade för owner-nyckel-bootstrap medan /projects såg låst ut."""
+    e = os.environ if env is None else env
+    return _sant(e.get("SERRIER_REQUIRE_AUTH"))
+
+
+def giltiga_nycklar(rå: str | None) -> list[str]:
+    """Parsa SERRIER_API_KEYS till faktiska nycklar — SAMMA regel som seed_nycklar_fran_env:
+    komma-separerat, trimmat, tomma bort. Så att grinden räknar riktiga nycklar, inte bara
+    att strängen är icke-tom (t.ex. ',' eller '   ' ger NOLL nycklar men icke-tom sträng)."""
+    return [k.strip() for k in (rå or "").split(",") if k.strip()]
+
+
 def krav_sakra_konfig(env: dict[str, str] | None = None) -> None:
     """Fail-closed startgrind (A): en osäker *prod*-konfiguration får inte starta tyst.
 
-    Om auth KRÄVS (SERRIER_REQUIRE_AUTH satt) men ingen owner-nyckel seedas
-    (SERRIER_API_KEYS tomt) skulle API:t starta med dev-owner-genvägen avstängd men utan
-    någon nyckel som kan autentisera — ett obrukbart och missvisande "säkert" läge. Vägra
-    starta istället. Rör inte dev (REQUIRE_AUTH osatt → friktionsfritt lokalt)."""
+    Om auth KRÄVS (SERRIER_REQUIRE_AUTH satt) men ingen GILTIG owner-nyckel seedas skulle
+    API:t starta med dev-owner-genvägen avstängd men utan någon nyckel som kan autentisera —
+    ett obrukbart och missvisande "säkert" läge. Vägra starta istället. Kollar faktiska
+    nycklar (inte bara att strängen är icke-tom): ',' eller enbart whitespace ger noll nycklar
+    och måste också avvisas. Rör inte dev (REQUIRE_AUTH osatt → friktionsfritt lokalt)."""
     e = os.environ if env is None else env
-    if _sant(e.get("SERRIER_REQUIRE_AUTH")) and not (e.get("SERRIER_API_KEYS") or "").strip():
+    if _auth_kravs(e) and not giltiga_nycklar(e.get("SERRIER_API_KEYS")):
         raise RuntimeError(
-            "osäker konfiguration: SERRIER_REQUIRE_AUTH är satt men SERRIER_API_KEYS är tomt "
-            "— seeda minst en owner-nyckel, annars kan ingen autentisera. Vägrar starta.")
+            "osäker konfiguration: SERRIER_REQUIRE_AUTH är satt men SERRIER_API_KEYS saknar en "
+            "giltig nyckel — seeda minst en owner-nyckel, annars kan ingen autentisera. "
+            "Vägrar starta.")
 
 
 @asynccontextmanager
@@ -96,7 +114,7 @@ def nuvarande_principal(request: Request, store: StoreDep) -> Principal:
         if p is None:
             raise HTTPException(status_code=401, detail="ogiltig API-nyckel")
         return p
-    if store.antal_nycklar() > 0 or os.environ.get("SERRIER_REQUIRE_AUTH"):
+    if store.antal_nycklar() > 0 or _auth_kravs():
         raise HTTPException(status_code=401, detail="API-nyckel krävs")
     return Principal(org_id=store.dev_org(), roll=Roll.owner, dev=True)
 
@@ -328,7 +346,7 @@ class SkapaNyckel(BaseModel):
 def skapa_org(b: SkapaOrg, store: StoreDep) -> dict:
     """Bootstrappa en org + dess första owner-nyckel. Öppen bara i dev-läge (ingen auth
     konfigurerad); när nycklar finns ELLER auth krävs måste en owner-nyckel användas."""
-    if store.antal_nycklar() > 0 or _sant(os.environ.get("SERRIER_REQUIRE_AUTH")):
+    if store.antal_nycklar() > 0 or _auth_kravs():
         raise HTTPException(status_code=403, detail="orgskapande kräver owner-nyckel i prod")
     org_id = store.skapa_org(b.namn)
     rå = store.skapa_nyckel(org_id, Roll.owner, "bootstrap owner")

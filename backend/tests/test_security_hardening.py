@@ -63,6 +63,19 @@ def test_A_konfig_ok_nar_auth_kravs_med_nycklar() -> None:
     krav_sakra_konfig({"SERRIER_REQUIRE_AUTH": "1", "SERRIER_API_KEYS": "owner-key-123"})
 
 
+@pytest.mark.parametrize("tomma", [",", " , ", "  ", ",,,", " ,\t,\n"])
+def test_A_konfig_vagrar_nar_api_keys_saknar_giltig_nyckel(tomma: str) -> None:
+    """Adversariell kant: en icke-tom men nyckel-LÖS sträng (',' / whitespace) seedar noll
+    nycklar och skulle bricka API:t (auth krävs, ingen nyckel) — måste också vägras."""
+    with pytest.raises(RuntimeError, match="osäker konfiguration"):
+        krav_sakra_konfig({"SERRIER_REQUIRE_AUTH": "1", "SERRIER_API_KEYS": tomma})
+
+
+def test_A_konfig_ok_med_nyckel_bland_tomma() -> None:
+    """Minst en giltig nyckel bland separatorer räcker (matchar seed-parsningen)."""
+    krav_sakra_konfig({"SERRIER_REQUIRE_AUTH": "1", "SERRIER_API_KEYS": " , owner-key , "})
+
+
 def test_A_konfig_ror_inte_dev_lage() -> None:
     """REQUIRE_AUTH osatt → dev-läge, inget krav på nycklar (friktionsfritt lokalt)."""
     krav_sakra_konfig({"SERRIER_API_KEYS": ""})
@@ -94,6 +107,37 @@ def test_A_orgs_bootstrap_oppen_i_dev(monkeypatch) -> None:
         r = c.post("/orgs", json={"namn": "dev"})
         assert r.status_code == 200
         assert r.json()["api_key"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("falskt", ["0", "false", "no", "off", "False", "OFF"])
+def test_A_require_auth_tolkas_konsekvent_falsy(monkeypatch, falskt: str) -> None:
+    """FYND 1 (fail-open): tidigare läste /orgs (_sant) och auth (rått) REQUIRE_AUTH olika,
+    så 'false' lät /orgs minta en owner-nyckel medan /projects såg låst (401). Nu är det EN
+    sanning: falsy → dev-läge ÖVERALLT (konsekvent), aldrig split-brain."""
+    monkeypatch.setenv("SERRIER_REQUIRE_AUTH", falskt)
+    # Separata färska stores: /orgs mintar en nyckel som annars skulle låsa /projects.
+    c1 = _klient()
+    try:
+        assert c1.post("/projects", json={"namn": "p"}).status_code == 200   # dev-owner, ej 401
+    finally:
+        app.dependency_overrides.clear()
+    c2 = _klient()
+    try:
+        assert c2.post("/orgs", json={"namn": "x"}).status_code == 200       # dev-bootstrap öppen
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("sant", ["1", "true", "yes", "on"])
+def test_A_require_auth_sant_laser_bade_orgs_och_projects(monkeypatch, sant: str) -> None:
+    """Truthy REQUIRE_AUTH → BÅDE /orgs (403) och /projects (401) låsta, konsekvent."""
+    monkeypatch.setenv("SERRIER_REQUIRE_AUTH", sant)
+    c = _klient()
+    try:
+        assert c.post("/orgs", json={"namn": "x"}).status_code == 403
+        assert c.post("/projects", json={"namn": "p"}).status_code == 401
     finally:
         app.dependency_overrides.clear()
 
@@ -286,6 +330,16 @@ def test_D_procentkodad_hemlighet_i_query_blockeras() -> None:
 
     c, up = _de_rig(FailureMode.balanced)
     r = c.post(f"/test/v1/messages?q={quote(RA)}", content=b'{"msg":"ren"}')
+    assert r.status_code == 403
+    assert not up.mottaget
+
+
+def test_D_dubbelkodad_hemlighet_i_query_blockeras() -> None:
+    """FYND 2: en DUBBELkodad hemlighet (?q=%2573k-…) gömmer sig bakom ett enda unquote.
+    Vi avkodar till fixpunkt, så den fångas ändå."""
+    c, up = _de_rig(FailureMode.balanced)
+    dubbel = quote(quote(RA))                         # två lager %-escaping
+    r = c.post(f"/test/v1/messages?q={dubbel}", content=b'{"msg":"ren"}')
     assert r.status_code == 403
     assert not up.mottaget
 
