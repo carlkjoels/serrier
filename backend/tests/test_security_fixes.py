@@ -42,3 +42,26 @@ def test_f1_orgs_bootstrap_oppen_i_dev(monkeypatch) -> None:
         assert c.post("/orgs", json={"namn": "acme"}).status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+
+# --- F2: scanner-sökväg begränsad till workspace --------------------------
+def test_f2_scan_utanfor_workspace_avvisas(monkeypatch, tmp_path) -> None:
+    ws = tmp_path / "workspace"
+    (ws / "proj").mkdir(parents=True)
+    (tmp_path / "utanfor").mkdir()
+    (ws / "lank").symlink_to(tmp_path / "utanfor")       # symlänk ut ur workspace
+    monkeypatch.setenv("SERRIER_WORKSPACE_ROOT", str(ws))
+    c = _klient(Store("sqlite:///:memory:"))
+    try:
+        pid = c.post("/projects", json={"namn": "p"}).json()["project_id"]
+        # inom workspace → ok
+        assert c.post(f"/projects/{pid}/scan",
+                      json={"sokvag": str(ws / "proj")}).status_code == 200
+        # utanför workspace → 403
+        assert c.post(f"/projects/{pid}/scan",
+                      json={"sokvag": str(tmp_path / "utanfor")}).status_code == 403
+        # symlänk som pekar ut → 403 (inom_roten resolvar länken)
+        assert c.post(f"/projects/{pid}/scan",
+                      json={"sokvag": str(ws / "lank")}).status_code == 403
+    finally:
+        app.dependency_overrides.clear()

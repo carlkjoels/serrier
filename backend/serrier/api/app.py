@@ -30,6 +30,7 @@ from serrier.guardian.policy import (
     policy_till_dict,
 )
 from serrier.scanners import natverk
+from serrier.scanners.base import inom_roten
 from serrier.scanners.registry import kor_skanners, tillgangliga
 
 
@@ -117,12 +118,23 @@ def skapa_projekt(b: SkapaProjekt, store: StoreDep, p: MemberDep) -> dict:
     return {"project_id": store.skapa_projekt(b.namn, p.org_id)}
 
 
+def _validera_skanningssokvag(sokvag: str) -> Path:
+    """F2: om SERRIER_WORKSPACE_ROOT är satt måste skanningssökvägen ligga INOM den (efter
+    symlänk-upplösning) — en klient får inte välja godtyckliga serverkataloger eller en annan
+    tenants data. Osatt → lokal-läge (ingen begränsning; dokumenterat som enanvändar-läge)."""
+    rot = Path(sokvag)
+    workspace = os.environ.get("SERRIER_WORKSPACE_ROOT")
+    if workspace and not inom_roten(Path(workspace), rot):
+        raise HTTPException(status_code=403, detail="sökväg utanför workspace")
+    if not rot.is_dir():
+        raise HTTPException(status_code=400, detail="sökvägen är ingen katalog")
+    return rot
+
+
 @app.post("/projects/{pid}/scan")
 def scan(pid: str, b: ScanBegaran, store: StoreDep, p: MemberDep) -> dict:
     _kravs_projekt(store, pid, p.org_id)
-    rot = Path(b.sokvag)
-    if not rot.is_dir():
-        raise HTTPException(status_code=400, detail="sökvägen är ingen katalog")
+    rot = _validera_skanningssokvag(b.sokvag)
     fynd = kor_skanners(rot, pid)
     scan_id = store.spara_scan(pid, fynd, [s.namn for s in tillgangliga()])
     return {"scan_id": scan_id, "antal_findings": len(fynd)}
