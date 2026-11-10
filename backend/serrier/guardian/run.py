@@ -32,7 +32,7 @@ from collections.abc import Callable
 
 import uvicorn
 
-from serrier.db.store import Store
+from serrier.db.store import Store, standard_db_url
 from serrier.guardian.policy import FailureMode
 from serrier.guardian.proxy import DEFAULT_ALLOWLIST, GuardProxy, Upstream, skapa_klient
 
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     # Fel här får aldrig hindra att skyddet startar.
     store = org_id = None
     try:
-        store = Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+        store = Store(standard_db_url())
         org_id = store.dev_org()
     except Exception as e:
         print(f"serrier: (events av — {type(e).__name__})", file=sys.stderr)

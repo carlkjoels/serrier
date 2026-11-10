@@ -16,7 +16,7 @@ import sys
 import time
 import webbrowser
 
-from serrier.db.store import Store
+from serrier.db.store import Store, standard_db_url
 from serrier.guardian import daemon
 
 _DASHBOARD = os.environ.get("SERRIER_DASHBOARD", "http://localhost:3000/guard")
@@ -30,7 +30,7 @@ def tray_status() -> dict:
     tally = dict.fromkeys(_AKTIONER, 0)
     antal = 0
     with contextlib.suppress(Exception):
-        store = Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+        store = Store(standard_db_url())
         for e in store.lista_guard_events(store.dev_org(), limit=500):
             antal += 1
             if e["action"] in tally:

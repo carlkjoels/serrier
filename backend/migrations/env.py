@@ -3,15 +3,14 @@
 
 from __future__ import annotations
 
-import os
-
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from serrier.db.models import Base
+from serrier.db.store import standard_db_url
 
 config = context.config
-_url = os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db")
+_url = standard_db_url()
 config.set_main_option("sqlalchemy.url", _url)
 
 target_metadata = Base.metadata
