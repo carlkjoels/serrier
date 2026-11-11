@@ -17,7 +17,7 @@ coverage limits honestly.
 
 **Phases 0–10 built.** Full MVP loop + all four modules + deployment hardening,
 multi-tenant auth, cross-detector correlation, regression tracking and SARIF/JSON
-export. Backend: 86 tests, ruff-clean. The product never claims "secure".
+export. Backend: 244 tests, ruff-clean. The product never claims "secure".
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — modules, central finding schema, stack, trust boundary.
 - [`THREAT_MODEL.md`](THREAT_MODEL.md) — Serrier processes untrusted input; what can go wrong.
@@ -40,6 +40,23 @@ export. Backend: 86 tests, ruff-clean. The product never claims "secure".
 | AI analyst (Claude) + approve→rescan→verify remediation | `backend/serrier/analyst.py`, `remediation.py` |
 | Analytics, SARIF 2.1.0 / JSON export, Next.js dashboard | `backend/serrier/{analytics,export}.py`, `frontend/` |
 | Scraping (Module B) + network/VPN posture (Module C) | `backend/serrier/scanners/{scraping,natverk}.py` |
+
+## Install (CLI + Guardian, no clone)
+
+The backend is published as a Python wheel on each
+[GitHub release](https://github.com/carlkjoels/serrier/releases). Requires Python 3.12+.
+
+```bash
+uv tool install https://github.com/carlkjoels/serrier/releases/download/v0.2.0/serrier-0.2.0-py3-none-any.whl
+serrier scan /path/to/repo     # local scan, no server
+serrier up                     # start the Pre-Send Guardian (see below)
+```
+
+`pipx install <same URL>` works too. State lives in `~/.serrier/` (override with
+`SERRIER_HOME`). **What the wheel does not include:** the dashboard (run from a clone, below),
+the desktop app, and the external scanners — `gitleaks`, `osv-scanner` and `semgrep` are
+separate tools; without them the built-in secret scanner still runs and the missing coverage
+is reported, not hidden.
 
 ## Run it
 
@@ -132,3 +149,7 @@ Serrier is a security product; its own architecture obeys the principles it reco
 (least privilege, secure-by-default, data minimization, explicit authorization, no
 secrets in logs). Scanned files, repos, scraped sites and AI output are **untrusted
 input** and are never executed or allowed to alter Serrier's own instructions.
+
+## License
+
+[Apache License 2.0](LICENSE).

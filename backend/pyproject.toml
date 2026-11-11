@@ -1,8 +1,10 @@
 [project]
 name = "serrier"
-version = "0.0.1"
+version = "0.2.0"
 description = "Serrier.ai — security intelligence backend"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dependencies = [
   "fastapi>=0.115",
   "pydantic>=2.9",
@@ -56,5 +58,5 @@ include = ["serrier*"]
 "serrier.scanners" = ["semgrep_rules/*.yaml"]
 
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]   # >=77: SPDX-licensfält (PEP 639)
 build-backend = "setuptools.build_meta"
