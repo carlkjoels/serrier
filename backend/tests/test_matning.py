@@ -4,6 +4,8 @@ Bevisar att vi MÄTER kvalitet, inte bara påstår den."""
 import json
 from pathlib import Path
 
+import pytest
+
 from serrier.core.findings import Category, Confidence, Finding, Severity
 from serrier.matning import matning
 from serrier.scanners.builtin import InbyggdHemlighetsskanner
@@ -43,6 +45,9 @@ def test_matning_falskt_positivt_och_missat() -> None:
 
 # --- mätning mot fixture-repot (integration) ---
 
+# Facit har en planterad injection som BARA semgrep kan hitta — utan semgrep är recall 0.5
+# av täckningsskäl, inte kvalitetsskäl. Hoppa då (som övriga semgrep-tester), fejla inte.
+@pytest.mark.skipif(not SemgrepAdapter().tillganglig(), reason="semgrep ej installerad")
 def test_skannerna_hittar_bada_utan_falska_positiva() -> None:
     funna: list[Finding] = []
     for s in (InbyggdHemlighetsskanner(), SemgrepAdapter()):
