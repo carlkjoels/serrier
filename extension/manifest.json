@@ -6,13 +6,14 @@
   "permissions": ["storage"],
   "host_permissions": [
     "http://127.0.0.1/*",
-    "https://claude.ai/*"
+    "https://claude.ai/*",
+    "https://chatgpt.com/*"
   ],
   "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
-      "matches": ["https://claude.ai/*"],
-      "js": ["content.js"],
+      "matches": ["https://claude.ai/*", "https://chatgpt.com/*"],
+      "js": ["decision.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

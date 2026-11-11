@@ -34,7 +34,8 @@ sent: **block / redact / warn / allow**.
 
 ## Supported sites (the honest, brittle part)
 
-- `claude.ai` only, in this scaffold. Selectors live in one place at the top of `content.js`.
+- `claude.ai` and `chatgpt.com` in this scaffold. Selectors live in one place at the top of
+  `content.js` (the `SAJTER` array).
 - **DOM-coupled and brittle:** providers redesign their compose UIs; selectors break. When a
   selector no longer matches, the extension returns **UNKNOWN** (warn/block), never
   fail-open-silent. Adding a site = adding a selector entry + a `host_permissions` match +
@@ -60,12 +61,30 @@ your secrets (same principle as the repo's `SECURITY.md`). Therefore:
   marked brittle in `content.js`).
 - More than one supported site; automated end-to-end tests against a live site.
 
+## Tests
+
+The security-critical logic — **an error-UNKNOWN (daemon down, no token, layout-miss) must
+never become `allow`** — is extracted into `decision.js` (pure, no DOM/chrome) and tested in
+Node, no browser or framework needed:
+
+```bash
+node extension/test/decision.test.js
+```
+
+It proves: daemon verdicts are followed (block/redact/allow); a reachable daemon's permissive
+"unknown" is an explicit allow (marked); and every failure path (unreachable / no-token /
+http-error / selector-miss) resolves to **block** (strict/fail-closed) or **confirm** (balanced)
+— **never a silent allow**. Browser-level end-to-end (real site interception) still requires
+manual unpacked loading.
+
 ## Files
 
 | File | Role |
 |---|---|
-| `manifest.json` | MV3 manifest; minimal permissions; one supported site |
+| `manifest.json` | MV3 manifest; minimal permissions; supported sites |
 | `background.js` | service worker — the only thing that fetches loopback `/inspect` |
-| `content.js` | the browser PEP — intercept submit, enforce verdict (selectors on top) |
+| `decision.js` | **pure** enforcement logic (verdict → action); shared by `content.js` + tests |
+| `content.js` | the browser PEP — intercept submit, map decision to DOM (selectors on top) |
 | `options.html` / `options.js` | configure port / token / failure mode / fail-closed |
 | `popup.html` / `popup.js` | status + "test connection" |
+| `test/decision.test.js` | Node test of the UNKNOWN-never-allow invariant |
