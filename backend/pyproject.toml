@@ -1,10 +1,22 @@
 [project]
 name = "serrier"
-version = "0.2.0"
-description = "Serrier.ai — security intelligence backend"
+version = "0.2.1"
+description = "Local security for AI-assisted development: repo scanner + Pre-Send Guardian"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+keywords = ["security", "secrets", "ai", "llm", "proxy", "scanner", "dlp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Security",
+]
 dependencies = [
   "fastapi>=0.115",
   "pydantic>=2.9",
@@ -14,6 +26,12 @@ dependencies = [
   "anthropic>=2.6.0",
   "alembic>=1.13",
 ]
+
+[project.urls]
+Homepage = "https://github.com/carlkjoels/serrier"
+Repository = "https://github.com/carlkjoels/serrier"
+Issues = "https://github.com/carlkjoels/serrier/issues"
+Changelog = "https://github.com/carlkjoels/serrier/releases"
 
 [project.optional-dependencies]
 # Postgres-drivrutin — bara i container/prod. SQLite kräver ingen extra dep.
