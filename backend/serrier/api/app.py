@@ -13,7 +13,6 @@ import os
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from functools import lru_cache
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -23,7 +22,8 @@ from pydantic import BaseModel
 from serrier import analyst, analytics, correlation, export, remediation
 from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
-from serrier.db.store import Store
+from serrier.core.sokvag import UtanforWorkspace, validera_scan_sokvag
+from serrier.db.store import Store, standard_db_url
 from serrier.guardian.inspect import inspect as guard_inspect
 from serrier.guardian.policy import (
     FailureMode,
@@ -36,14 +36,51 @@ from serrier.scanners.registry import kor_skanners, tillgangliga
 
 @lru_cache(maxsize=1)
 def get_store() -> Store:                      # lat singleton; överskrivs i test
-    return Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+    return Store(standard_db_url())
 
 
 StoreDep = Annotated[Store, Depends(get_store)]
 
 
+def _sant(v: str | None) -> bool:
+    return (v or "").strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _auth_kravs(env: dict[str, str] | None = None) -> bool:
+    """EN sanning för "kräver auth?" — delas av startgrinden, auth-beslutet och /orgs-grinden.
+    Tidigare läste de tre ställena SERRIER_REQUIRE_AUTH olika (rått vs `_sant`), så t.ex.
+    "false" kunde betyda 'auth krävs' på ett ställe och 'auth ej krävd' på ett annat → ett
+    split-brain där /orgs öppnade för owner-nyckel-bootstrap medan /projects såg låst ut."""
+    e = os.environ if env is None else env
+    return _sant(e.get("SERRIER_REQUIRE_AUTH"))
+
+
+def giltiga_nycklar(rå: str | None) -> list[str]:
+    """Parsa SERRIER_API_KEYS till faktiska nycklar — SAMMA regel som seed_nycklar_fran_env:
+    komma-separerat, trimmat, tomma bort. Så att grinden räknar riktiga nycklar, inte bara
+    att strängen är icke-tom (t.ex. ',' eller '   ' ger NOLL nycklar men icke-tom sträng)."""
+    return [k.strip() for k in (rå or "").split(",") if k.strip()]
+
+
+def krav_sakra_konfig(env: dict[str, str] | None = None) -> None:
+    """Fail-closed startgrind (A): en osäker *prod*-konfiguration får inte starta tyst.
+
+    Om auth KRÄVS (SERRIER_REQUIRE_AUTH satt) men ingen GILTIG owner-nyckel seedas skulle
+    API:t starta med dev-owner-genvägen avstängd men utan någon nyckel som kan autentisera —
+    ett obrukbart och missvisande "säkert" läge. Vägra starta istället. Kollar faktiska
+    nycklar (inte bara att strängen är icke-tom): ',' eller enbart whitespace ger noll nycklar
+    och måste också avvisas. Rör inte dev (REQUIRE_AUTH osatt → friktionsfritt lokalt)."""
+    e = os.environ if env is None else env
+    if _auth_kravs(e) and not giltiga_nycklar(e.get("SERRIER_API_KEYS")):
+        raise RuntimeError(
+            "osäker konfiguration: SERRIER_REQUIRE_AUTH är satt men SERRIER_API_KEYS saknar en "
+            "giltig nyckel — seeda minst en owner-nyckel, annars kan ingen autentisera. "
+            "Vägrar starta.")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    krav_sakra_konfig()                             # vägra starta i osäkert prod-läge (A)
     # Seed owner-nycklar från env vid start (prod/compose). Osatt → inget byggs (test).
     rå = os.environ.get("SERRIER_API_KEYS", "")
     if rå:
@@ -77,7 +114,7 @@ def nuvarande_principal(request: Request, store: StoreDep) -> Principal:
         if p is None:
             raise HTTPException(status_code=401, detail="ogiltig API-nyckel")
         return p
-    if store.antal_nycklar() > 0 or os.environ.get("SERRIER_REQUIRE_AUTH"):
+    if store.antal_nycklar() > 0 or _auth_kravs():
         raise HTTPException(status_code=401, detail="API-nyckel krävs")
     return Principal(org_id=store.dev_org(), roll=Roll.owner, dev=True)
 
@@ -119,7 +156,10 @@ def skapa_projekt(b: SkapaProjekt, store: StoreDep, p: MemberDep) -> dict:
 @app.post("/projects/{pid}/scan")
 def scan(pid: str, b: ScanBegaran, store: StoreDep, p: MemberDep) -> dict:
     _kravs_projekt(store, pid, p.org_id)
-    rot = Path(b.sokvag)
+    try:
+        rot = validera_scan_sokvag(b.sokvag)      # B: confinement vid API-gränsen
+    except UtanforWorkspace as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
     if not rot.is_dir():
         raise HTTPException(status_code=400, detail="sökvägen är ingen katalog")
     fynd = kor_skanners(rot, pid)
@@ -264,7 +304,9 @@ def atgardsforslag(pid: str, fid: str, store: StoreDep, p: MemberDep) -> dict:
     """AI-analysten + remediation föreslår (Claude). Sätter status remediation_proposed.
     Inget appliceras — förslaget kräver uttryckligt godkännande."""
     f = _kravs_fynd(store, pid, fid, p.org_id)
-    analyst.ladda_nyckel()
+    if not analyst.ladda_nyckel():
+        raise HTTPException(status_code=503,
+                            detail="AI-analys otillgänglig: ANTHROPIC_API_KEY saknas i miljön")
     forslag = remediation.foresla_atgard(f)
     store.satt_status(pid, fid, Status.remediation_proposed)
     return forslag
@@ -303,8 +345,8 @@ class SkapaNyckel(BaseModel):
 @app.post("/orgs")
 def skapa_org(b: SkapaOrg, store: StoreDep) -> dict:
     """Bootstrappa en org + dess första owner-nyckel. Öppen bara i dev-läge (ingen auth
-    konfigurerad); när nycklar finns krävs en owner-nyckel för att skapa fler orgar."""
-    if store.antal_nycklar() > 0:
+    konfigurerad); när nycklar finns ELLER auth krävs måste en owner-nyckel användas."""
+    if store.antal_nycklar() > 0 or _auth_kravs():
         raise HTTPException(status_code=403, detail="orgskapande kräver owner-nyckel i prod")
     org_id = store.skapa_org(b.namn)
     rå = store.skapa_nyckel(org_id, Roll.owner, "bootstrap owner")

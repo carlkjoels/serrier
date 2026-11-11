@@ -1,5 +1,5 @@
 [project]
-name = "serrier-backend"
+name = "serrier"
 version = "0.0.1"
 description = "Serrier.ai — security intelligence backend"
 requires-python = ">=3.12"
@@ -49,6 +49,11 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["serrier*"]
+
+# Icke-Python-filer som koden läser vid körning måste följa med i wheeln (annars saknar
+# en installerad semgrep-adapter sina regler).
+[tool.setuptools.package-data]
+"serrier.scanners" = ["semgrep_rules/*.yaml"]
 
 [build-system]
 requires = ["setuptools>=61"]

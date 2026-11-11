@@ -20,9 +20,8 @@ users' weaknesses and their secrets. Serrier therefore obeys the principles it r
 
 - Detected secrets are **redacted at the point of detection** (`sk-…abcd` → `sk-***`).
 - Stored as a **redacted form + salted hash** for dedup/match — never full plaintext.
-- If raw content must be held transiently, it is **crypto-shredded** using the
-  `kryptoradering` pattern from selvra-analysis (per-item AES-256 key in a separate vault;
-  deletion = key destruction; proof not receipt).
+- If raw content must be held transiently, it is **crypto-shredded** (per-item AES-256 key in
+  a separate vault; deletion = key destruction; proof, not receipt).
 - A found secret is treated as **compromised**: remediation recommends **rotation/
   revocation**, never "just delete the line" (git history still holds it).
 
@@ -42,7 +41,22 @@ re-checked by authz on every query. Cross-tenant access is a tested-against fail
 Evidence is kept only as long as useful; sensitive evidence supports verifiable deletion
 (crypto-shred). Users can request erasure of a project's data.
 
-## Reporting a vulnerability
+## Reporting a vulnerability (coordinated disclosure)
 
-Pre-release: open a private issue to the maintainer. No public disclosure before a fix.
-(A real disclosure policy + contact lands before any external users.)
+Serrier is pre-release and single-maintainer. We ask for **coordinated disclosure**:
+
+- **Contact:** email the maintainer at `ckarjalainenjoels@gmail.com` with subject
+  `SERRIER-SECURITY`, or open a **private** GitHub security advisory
+  (`Security → Report a vulnerability`) on `github.com/carlkjoels/serrier`. Do **not** open a
+  public issue for an unfixed vulnerability.
+- **Please include:** affected component/version (commit SHA), reproduction steps, impact, and
+  any PoC. Reports of a **real secret leak-through** (something sensitive reaching an upstream)
+  are treated as highest priority.
+- **Our commitments:** acknowledge within **3 business days**; an initial assessment within
+  **10 business days**; we agree a disclosure timeline together (target **90 days** or on fix
+  availability, whichever is sooner). We credit reporters who want it.
+- **Safe harbor:** good-faith research that respects these terms and does not access other
+  users' data, degrade service, or exfiltrate secrets will not be pursued.
+
+This policy will be revised (dedicated security contact, PGP key, scope) before Serrier has
+external users. Until then it reflects exactly what a single maintainer can honestly commit to.

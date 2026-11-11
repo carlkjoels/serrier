@@ -864,7 +864,7 @@ wheels = [
 ]
 
 [[package]]
-name = "serrier-backend"
+name = "serrier"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [

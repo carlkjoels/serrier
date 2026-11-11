@@ -19,7 +19,6 @@ import os
 import secrets
 import signal
 import socket
-import stat
 import subprocess
 import sys
 import time
@@ -27,9 +26,15 @@ from pathlib import Path
 
 import uvicorn
 
-from serrier.db.store import Store
+from serrier.db.store import Store, standard_db_url
 from serrier.guardian.policy import FailureMode
-from serrier.guardian.proxy import DEFAULT_ALLOWLIST, GuardProxy, Upstream, skapa_klient
+from serrier.guardian.proxy import (
+    DEFAULT_ALLOWLIST,
+    GuardProxy,
+    Upstream,
+    skapa_klient,
+    skriv_token,
+)
 from serrier.guardian.run import _BASE_URL_ENV
 
 _DIR = Path(os.environ.get("SERRIER_HOME", str(Path.home() / ".serrier")))
@@ -50,9 +55,7 @@ def stabil_token() -> str:
     if _TOKEN_FIL.exists():
         return _TOKEN_FIL.read_text().strip()
     token = secrets.token_urlsafe(24)
-    _TOKEN_FIL.touch(mode=stat.S_IRUSR | stat.S_IWUSR, exist_ok=True)   # 0600
-    _TOKEN_FIL.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    _TOKEN_FIL.write_text(token)
+    skriv_token(token, _TOKEN_FIL)                          # delad 0600-skrivare (G)
     return token
 
 
@@ -98,7 +101,7 @@ def serve(port: int) -> None:
     token = stabil_token()
     store = org_id = None
     with contextlib.suppress(Exception):
-        store = Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+        store = Store(standard_db_url())
         org_id = store.dev_org()
     mode = FailureMode(os.environ.get("SERRIER_PROXY_FAILURE_MODE", "balanced"))
     proxy = GuardProxy(klient=skapa_klient(), failure_mode=mode, token=token,
