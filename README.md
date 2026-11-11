@@ -43,20 +43,20 @@ export. Backend: 244 tests, ruff-clean. The product never claims "secure".
 
 ## Install (CLI + Guardian, no clone)
 
-The backend is published as a Python wheel on each
-[GitHub release](https://github.com/carlkjoels/serrier/releases). Requires Python 3.12+.
-
 ```bash
-uv tool install https://github.com/carlkjoels/serrier/releases/download/v0.2.0/serrier-0.2.0-py3-none-any.whl
+pip install serrier            # Python 3.12+; or: pipx install serrier / uv tool install serrier
 serrier scan /path/to/repo     # local scan, no server
 serrier up                     # start the Pre-Send Guardian (see below)
 ```
 
-`pipx install <same URL>` works too. State lives in `~/.serrier/` (override with
-`SERRIER_HOME`). **What the wheel does not include:** the dashboard (run from a clone, below),
-the desktop app, and the external scanners — `gitleaks`, `osv-scanner` and `semgrep` are
-separate tools; without them the built-in secret scanner still runs and the missing coverage
-is reported, not hidden.
+State lives in `~/.serrier/` (override with `SERRIER_HOME`). **What the package does not
+include:** the dashboard (run from a clone, below), the desktop app, and the external scanners —
+`gitleaks`, `osv-scanner` and `semgrep` are separate tools; without them the built-in secret
+scanner still runs and the missing coverage is reported, not hidden.
+
+Releases are published to [PyPI](https://pypi.org/project/serrier/) from GitHub Actions via
+Trusted Publishing (no stored token); the same files are attached to each
+[GitHub release](https://github.com/carlkjoels/serrier/releases).
 
 ## Run it
 
