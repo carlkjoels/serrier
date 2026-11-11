@@ -30,9 +30,12 @@ jobs:
       - name: Lint + tester (grind före publicering)
         working-directory: backend
         run: |
+          # semgrep är ett externt verktyg (ej paketberoende). Utan det HOPPAS semgrep-testerna
+          # över — installera det så att grinden faktiskt kör dem. Samma pin som Dockerfile.
+          uv tool install semgrep==1.142.0
           uv sync --locked
           uv run ruff check serrier tests migrations
-          uv run pytest -q
+          uv run pytest -q -rs
 
       - name: Bygg wheel + sdist
         working-directory: backend
