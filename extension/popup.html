@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <title>Serrier</title>
+  <style>
+    body { font: 13px system-ui; width: 260px; margin: 12px; color: #222; }
+    h3 { margin: 0 0 8px; } .row { margin: 6px 0; }
+    .ok { color: #0a7d2c; } .err { color: #b00020; } .muted { color: #666; }
+    button { margin-top: 10px; padding: 6px 10px; width: 100%; }
+    a { color: #2457d6; }
+  </style>
+</head>
+<body>
+  <h3>Serrier Pre-Send Guardian</h3>
+  <div class="row muted" id="scope">Skyddar: stödda AI-sajter (scaffold)</div>
+  <div class="row">Daemon: <span id="daemon">kontrollerar…</span></div>
+  <div class="row">Fel-läge: <span id="mode">—</span></div>
+  <button id="test">Testa anslutning</button>
+  <div class="row"><a href="#" id="opts">Inställningar</a></div>
+  <script src="popup.js"></script>
+</body>
+</html>
