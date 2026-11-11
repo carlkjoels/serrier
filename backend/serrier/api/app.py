@@ -23,7 +23,7 @@ from serrier import analyst, analytics, correlation, export, remediation
 from serrier.auth import Principal, Roll, far
 from serrier.core.findings import Status
 from serrier.core.sokvag import UtanforWorkspace, validera_scan_sokvag
-from serrier.db.store import Store
+from serrier.db.store import Store, standard_db_url
 from serrier.guardian.inspect import inspect as guard_inspect
 from serrier.guardian.policy import (
     FailureMode,
@@ -36,7 +36,7 @@ from serrier.scanners.registry import kor_skanners, tillgangliga
 
 @lru_cache(maxsize=1)
 def get_store() -> Store:                      # lat singleton; överskrivs i test
-    return Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+    return Store(standard_db_url())
 
 
 StoreDep = Annotated[Store, Depends(get_store)]

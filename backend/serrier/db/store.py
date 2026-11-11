@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -56,8 +57,22 @@ def engine_kwargs(url: str) -> dict:
     return {"pool_pre_ping": True}
 
 
+def standard_db_url() -> str:
+    """DB-URL när ingen anges: ``SERRIER_DB_URL`` om satt, annars en SQLite-fil i
+    ``SERRIER_HOME`` (default ``~/.serrier``) — samma katalog som daemonens pid/token/env.
+    En ABSOLUT sökväg, så att CLI, daemon och backend delar DB oavsett aktuell katalog
+    (en relativ ``serrier.db`` gav en ny, tom databas per katalog för ett installerat paket)."""
+    url = os.environ.get("SERRIER_DB_URL")
+    if url:
+        return url
+    hem = Path(os.environ.get("SERRIER_HOME", str(Path.home() / ".serrier")))
+    hem.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return f"sqlite:///{(hem / 'serrier.db').resolve()}"
+
+
 class Store:
-    def __init__(self, url: str = "sqlite:///serrier.db") -> None:
+    def __init__(self, url: str | None = None) -> None:
+        url = url or standard_db_url()
         self._engine = create_engine(url, **engine_kwargs(url))
         # I prod äger Alembic schemat (SERRIER_SKIP_CREATE_ALL=1). Dev/test skapar på plats.
         if not os.environ.get("SERRIER_SKIP_CREATE_ALL"):

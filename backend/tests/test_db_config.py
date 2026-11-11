@@ -3,6 +3,7 @@ Det senare fångar drift: ändras en modell utan migration failar testet."""
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from alembic import command
@@ -11,7 +12,8 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.pool import StaticPool
 
 from serrier.db.models import Base
-from serrier.db.store import engine_kwargs
+from serrier.db.store import engine_kwargs, standard_db_url
+from serrier.scanners import semgrep_adapter
 
 _BACKEND = Path(__file__).resolve().parent.parent
 
@@ -44,3 +46,29 @@ def test_migration_ger_samma_schema_som_modellerna(tmp_path: Path, monkeypatch) 
 
     migrerade = set(inspect(create_engine(url)).get_table_names())
     assert set(Base.metadata.tables) <= migrerade
+
+
+def test_standard_db_url_env_vinner(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("SERRIER_HOME", str(tmp_path / "hem"))
+    monkeypatch.setenv("SERRIER_DB_URL", "sqlite:///:memory:")
+    assert standard_db_url() == "sqlite:///:memory:"
+    assert not (tmp_path / "hem").exists()          # rör inte hemkatalogen när URL är satt
+
+
+def test_standard_db_url_absolut_i_serrier_home(monkeypatch, tmp_path: Path) -> None:
+    """Utan SERRIER_DB_URL: en ABSOLUT fil i SERRIER_HOME — oberoende av aktuell katalog."""
+    hem = tmp_path / "hem"
+    monkeypatch.delenv("SERRIER_DB_URL", raising=False)
+    monkeypatch.setenv("SERRIER_HOME", str(hem))
+    monkeypatch.chdir(tmp_path)
+    url = standard_db_url()
+    assert url == f"sqlite:///{(hem / 'serrier.db').resolve()}"
+    assert hem.is_dir()
+
+
+def test_semgrep_regler_ar_deklarerade_som_paketdata() -> None:
+    """Reglerna är en icke-Python-fil: utan package-data hamnar de inte i wheeln."""
+    assert semgrep_adapter._REGLER.is_file()
+    data = tomllib.loads((_BACKEND / "pyproject.toml").read_text())
+    monster = data["tool"]["setuptools"]["package-data"]["serrier.scanners"]
+    assert any(semgrep_adapter._REGLER.match(m) for m in monster)

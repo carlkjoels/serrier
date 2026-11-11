@@ -26,7 +26,7 @@ from pathlib import Path
 
 import uvicorn
 
-from serrier.db.store import Store
+from serrier.db.store import Store, standard_db_url
 from serrier.guardian.policy import FailureMode
 from serrier.guardian.proxy import (
     DEFAULT_ALLOWLIST,
@@ -101,7 +101,7 @@ def serve(port: int) -> None:
     token = stabil_token()
     store = org_id = None
     with contextlib.suppress(Exception):
-        store = Store(os.environ.get("SERRIER_DB_URL", "sqlite:///serrier.db"))
+        store = Store(standard_db_url())
         org_id = store.dev_org()
     mode = FailureMode(os.environ.get("SERRIER_PROXY_FAILURE_MODE", "balanced"))
     proxy = GuardProxy(klient=skapa_klient(), failure_mode=mode, token=token,
