@@ -13,6 +13,11 @@ Every finding carries **evidence · context · impact · remediation · verifica
 Serrier never claims a system is "secure" — it reports residual risk, confidence, and
 coverage limits honestly.
 
+**Role:** Serrier is the *broad analysis and remediation* system. The *narrow proof layer* for
+agent decisions — a signed, tamper-evident log of what a code agent was allowed to do — is
+[agentbevis](https://github.com/carlkjoels/agentbevis), a separate repo (a pivot out of this
+analysis). They do not merge: **Serrier analyzes and remediates; agentbevis proves.**
+
 ## Status
 
 **Phases 0–10 built.** Full MVP loop + all four modules + deployment hardening,
