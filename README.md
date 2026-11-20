@@ -18,6 +18,15 @@ agent decisions — a signed, tamper-evident log of what a code agent was allowe
 [agentbevis](https://github.com/carlkjoels/agentbevis), a separate repo (a pivot out of this
 analysis). They do not merge: **Serrier analyzes and remediates; agentbevis proves.**
 
+## Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture.dark.png">
+  <img alt="Serrier architecture: scan targets → scanners → ingest → Core (Finding schema) → remediation and AI analyst, inside a modular-monolith backend with a resource-limited trust boundary around the scanners" src="docs/architecture.light.png">
+</picture>
+
+Interactive version: [`docs/architecture.html`](docs/architecture.html). Details in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
 ## Status
 
 **Phases 0–10 built.** Full MVP loop + all four modules + deployment hardening,
@@ -75,6 +84,11 @@ Starts backend + frontend, waits for them, prints the links, and Ctrl-C stops bo
 - Dashboard (scanner): http://localhost:3000
 - Pre-Send Guardian (live prevention): http://localhost:3000/guard
 - API docs: http://localhost:8000/docs
+
+Configuration: every environment variable (with its default) is listed in
+[`backend/.env.example`](backend/.env.example) and
+[`frontend/.env.example`](frontend/.env.example) — copy them to `.env` / `.env.local` and
+fill in the secrets. `make dev` runs without them (SQLite, auth off).
 
 Other make targets: `make test` · `make lint` · `make scan REPO=/path` (scan a repo locally,
 no server) · `make guard CMD="claude"` (run an AI tool through the Guardian). `make help` lists

@@ -1,0 +1,46 @@
+name: ci
+
+# Grind på varje pull request (och push till main): lint + typkontroll + tester.
+# Speglar publiceringsgrinden i publish.yml, men körs före merge, inte bara vid release.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6
+      - name: Verktyg + beroenden (låst)
+        run: |
+          # semgrep är ett externt verktyg (ej paketberoende); samma pin som Dockerfile/publish.
+          uv tool install semgrep==1.142.0
+          uv sync --locked
+      - name: Lint (ruff)
+        run: uv run ruff check serrier tests migrations
+      - name: Tester (pytest)
+        run: uv run pytest -q -rs
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typkontroll + bygge
+        run: npm run build

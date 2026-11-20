@@ -30,3 +30,6 @@ data/
 
 # Downloaded scanner binaries (not committed)
 backend/.tools/
+
+# men exempel-filer ska med
+!.env.example
